@@ -711,7 +711,7 @@ const dirty = new Set(lsGet("dirty") || []);
 const _dAdd = dirty.add.bind(dirty), _dDel = dirty.delete.bind(dirty);
 dirty.add = k => { _dAdd(k); lsSet("dirty", [...dirty]); return dirty; };
 dirty.delete = k => { const r = _dDel(k); lsSet("dirty", [...dirty]); return r; };
-const PAGE_VERSION = "8";
+const PAGE_VERSION = "9";
 function save(k) {
   lsSet(k, S[k]); lsSet("savedAt", Date.now()); if (typeof fileChanged === "function") fileChanged();
   dirty.add(k); if (!COL) return;
@@ -790,7 +790,7 @@ ACT.syncNow = () => { if (!COL) { toast("Pas encore connectée à ton compte"); 
 // ---------- Navigation ----------
 const VIEWS = [
   ["aujourdhui","Aujourd'hui",165,"sun"],["agenda","Agenda",250,"calendar"],["todo","To-do",200,"check"],["suf","SUF · Pôle camp",135,"tent"],
-  ["sport","Sport",45,"dumbbell"],["cours","Cours",305,"book"],["idees","Idées",90,"bulb"],["evangile","Spi",20,"cross"],["entrainement","Entraînement",285,"target"],["jeux","Jeux",340,"dice"]
+  ["sport","Sport",45,"dumbbell"],["cours","Cours",305,"book"],["idees","Idées",90,"bulb"],["evangile","Spi",20,"cross"],["entrainement","Entraînement",285,"target"]
 ];
 const cur = () => { const h = location.hash.slice(1); return VIEWS.some(v => v[0] === h) || h === "reglages" ? h : "aujourdhui"; };
 function renderNav() {
@@ -799,7 +799,27 @@ function renderNav() {
   $("#nav").innerHTML = VIEWS.map(([id, n, h, i]) => `<a href="#${id}" style="--h:${h}" ${c === id ? 'aria-current="page"' : ""}><span class="ico">${ic(i, 17)}</span>${n}${id === "todo" && late ? `<span class="cnt" title="Tâches pour aujourd'hui ou en retard">${late}</span>` : ""}</a>`).join("");
   $("#brand-date").textContent = fmtLong(T);
 }
+// Examens et oraux des Cours : une tâche liée dans la to-do (id « c_ » + id de l'échéance), donc aussi dans l'agenda
+const DL_LINK = ["Examen", "Oral"];
+function coursLink() {
+  if (!S.cours || !S.todo) return;
+  let ch = false, chC = false;
+  const tag = (S.todo.tags.find(t => t.id === "cours") || S.todo.tags.find(t => t.page === "cours") || S.todo.tags[0] || {}).id || "";
+  for (const sub of S.cours.subjects) for (const dl of sub.deadlines) {
+    if (!DL_LINK.includes(dl.type) || dl.noTask || dl.ex || sub.ex) continue;
+    const id = "c_" + dl.id;
+    const title = `${dl.type} · ${sub.name} : ${dl.title}`;
+    let t = S.todo.tasks.find(x => x.id === id);
+    if (!t) { t = {id, title, due:dl.date, tag, prio:3, done:!!dl.done, status:dl.done ? "done" : "todo", detail:"", cours:dl.id}; S.todo.tasks.push(t); ch = true; continue; }
+    if (t.title !== title || t.due !== dl.date) { t.title = title; t.due = dl.date; ch = true; }
+    if (!!t.done !== !!dl.done) { dl.done = !!t.done; chC = true; } // cochée dans la to-do ou l'agenda
+  }
+  if (ch) save("todo"); if (chC) save("cours");
+}
+// Tâche liée supprimée depuis la to-do : on ne la recrée pas
+function unlinkCours(tasks) { let c = false; tasks.filter(t => t.cours).forEach(t => S.cours.subjects.forEach(s => s.deadlines.forEach(d => { if (d.id === t.cours) { d.noTask = true; c = true; } }))); if (c) save("cours"); }
 function render() {
+  coursLink();
   renderNav();
   const c = cur(); const v = VIEWS.find(x => x[0] === c);
   const el = $("#view");
@@ -1002,8 +1022,8 @@ document.addEventListener("dragover", e => { const col = e.target.closest && e.t
 document.addEventListener("drop", e => { const col = e.target.closest && e.target.closest(".kcol"); if (!col) return; e.preventDefault(); const id = e.dataTransfer.getData("text/plain"); if (id) { setStatus(id, col.dataset.col); render(); } });
 ACT.todoTag = el => { S.prefs.todoTag = el.dataset.id; save("prefs"); };
 ACT.toggleDone = () => { S.prefs.showDone = !S.prefs.showDone; save("prefs"); };
-ACT.clearDone = () => { S.todo.tasks = S.todo.tasks.filter(t => !t.done); save("todo"); };
-ACT.taskDel = el => { if (editT === el.dataset.id) editT = null; S.todo.tasks = S.todo.tasks.filter(t => t.id !== el.dataset.id); save("todo"); };
+ACT.clearDone = () => { unlinkCours(S.todo.tasks.filter(t => t.done)); S.todo.tasks = S.todo.tasks.filter(t => !t.done); save("todo"); };
+ACT.taskDel = el => { if (editT === el.dataset.id) editT = null; unlinkCours(S.todo.tasks.filter(t => t.id === el.dataset.id)); S.todo.tasks = S.todo.tasks.filter(t => t.id !== el.dataset.id); save("todo"); };
 ACT.tagDel = el => { if (S.todo.tags.length <= 1) return toast("Garde au moins une étiquette"); S.todo.tags = S.todo.tags.filter(t => t.id !== el.dataset.id); if (S.prefs.todoTag === el.dataset.id) S.prefs.todoTag = "all"; save("todo"); save("prefs"); };
 IN.taskDetail = el => { S.todo.tasks.find(x => x.id === el.dataset.id).detail = el.value; grow(el); save("todo"); return false; };
 IN.taskDone = el => { const t = S.todo.tasks.find(x => x.id === el.dataset.id); t.done = el.checked; t.status = el.checked ? "done" : "todo"; save("todo"); if (el.checked) toast("Bien joué !"); setTimeout(render, 250); return false; };
@@ -1015,7 +1035,6 @@ function dueOn(d) {
   const T = today();
   S.todo.tasks.forEach(t => { if (!t.done && t.due) { const end = t.due2 || t.due; if ((t.due <= d && d <= end) || (d === T && end < T)) out.push({title:t.title, h:(tagOf(t.tag) || {h:200}).h, page:"todo", id:t.id, late:end < d, prio:t.prio, span:t.due2 ? `${pISO(t.due).getDate()}–${pISO(t.due2).getDate()}` : ""}); } });
   S.suf.tasks.forEach(t => { if (t.due === d && !t.done) out.push({title:"Camp · " + t.title, h:135, page:"suf"}); });
-  S.cours.subjects.forEach(s => s.deadlines.forEach(x => { if (x.date === d && !x.done) out.push({title:s.name + " · " + x.title, h:s.h, page:"cours"}); }));
   return out;
 }
 const accOf = id => S.agenda.accounts.find(a => a.id === id) || S.agenda.accounts[0] || {h:250,name:"",email:""};
@@ -1044,7 +1063,7 @@ R.agenda = () => {
      const dt = dueOn(d);
      return `<div class="day ${d === T ? "today" : ""}"><div class="day-h"><span>${JC[x.getDay()]}</span><b>${x.getDate()}</b><span class="small muted" style="text-transform:none;letter-spacing:0;font-weight:500">${esc(fete(d))}</span></div>${evs.map(e => evChip(e, true)).join("")}${dt.map(agDueChip).join("")}</div>`; }).join("")}</div>
   ${undatedBlock()}
-  <p class="muted small row" style="gap:4px">Les rendez-vous sont en couleur. Les tâches de ta to-do (et celles du camp et des cours) apparaissent le jour de leur échéance : coche-les pour les marquer faites. Les tâches en retard s'affichent aujourd'hui.</p>
+  <p class="muted small row" style="gap:4px">Les rendez-vous sont en couleur. Les tâches de ta to-do (avec tes examens et oraux) et celles du camp apparaissent le jour de leur échéance : coche-les pour les marquer faites. Les tâches en retard s'affichent aujourd'hui.</p>
   <div class="grid-2">
   <section class="card"><h2>${ic("calendar")}Ajouter un rendez-vous</h2>
     <form class="stack" data-form="evAdd">
@@ -1441,11 +1460,11 @@ const selSub = () => S.cours.subjects.find(s => s.id === S.prefs.coursSel) || S.
 ACT.subSel = el => { S.prefs.coursSel = el.dataset.id; rev = null; save("prefs"); };
 ACT.subDel = el => { S.cours.subjects = S.cours.subjects.filter(s => s.id !== el.dataset.id); save("cours"); };
 FORM.subAdd = (f, d) => { const hs = [250,20,85,165,305,45,200]; const s = {id:uid(),name:d.get("n"),h:hs[S.cours.subjects.length % hs.length],notes:"",deadlines:[],cards:[]}; S.cours.subjects.push(s); S.prefs.coursSel = s.id; save("cours"); save("prefs"); };
-FORM.dlAdd = (f, d) => { selSub().deadlines.push({id:uid(),title:d.get("t"),date:d.get("d"),type:d.get("ty"),done:false}); save("cours"); };
+FORM.dlAdd = (f, d) => { selSub().deadlines.push({id:uid(),title:d.get("t"),date:d.get("d"),type:d.get("ty"),done:false}); save("cours"); if (DL_LINK.includes(d.get("ty"))) toast("Ajouté aussi à ta to-do et à ton agenda"); };
 FORM.cardAdd = (f, d) => { selSub().cards.push({id:uid(),q:d.get("q"),a:d.get("a"),box:1}); save("cours"); };
-ACT.dlDel = el => { const s = selSub(); s.deadlines = s.deadlines.filter(x => x.id !== el.dataset.id); save("cours"); };
+ACT.dlDel = el => { const s = selSub(); s.deadlines = s.deadlines.filter(x => x.id !== el.dataset.id); save("cours"); const n = S.todo.tasks.length; S.todo.tasks = S.todo.tasks.filter(t => t.id !== "c_" + el.dataset.id); if (S.todo.tasks.length !== n) save("todo"); };
 ACT.cardDel = el => { const s = selSub(); s.cards = s.cards.filter(x => x.id !== el.dataset.id); save("cours"); };
-IN.dlDone = el => { const x = selSub().deadlines.find(d => d.id === el.dataset.id); x.done = el.checked; save("cours"); };
+IN.dlDone = el => { const x = selSub().deadlines.find(d => d.id === el.dataset.id); x.done = el.checked; save("cours"); const t = S.todo.tasks.find(t => t.id === "c_" + x.id); if (t) { t.done = x.done; t.status = x.done ? "done" : "todo"; save("todo"); } };
 IN.subNotes = el => { selSub().notes = el.value; save("cours"); return false; };
 ACT.revStart = () => { const s = selSub(); rev = {sid:s.id, queue:shuffle(s.cards).sort((a, b) => a.box - b.box).map(c => c.id), shown:false, ok:0, n:0, seen:new Set()}; };
 ACT.revShow = () => { rev.shown = true; };
