@@ -10,3 +10,11 @@
 
 Mettre à jour plus tard : remplace `index.html` dans le dépôt (Add file › Upload files) par la nouvelle version.
 
+## Synchro automatique des agendas Google (une seule fois)
+
+Le site ne peut pas lire Google Agenda tout seul : une petite fonction Supabase fait le relais.
+
+1. Supabase › **Edge Functions** › **Deploy a new function** › **Via Editor**.
+2. Nom de la fonction : `ical` (exactement).
+3. Efface le code proposé, colle tout le contenu du fichier `supabase/functions/ical/index.ts`, puis **Deploy function**. Laisse « Verify JWT » activé.
+4. Sur le site › Agenda › Mes comptes Google : colle l'**adresse secrète au format iCal** de chaque agenda (Google Agenda › Paramètres › ton agenda › tout en bas).
