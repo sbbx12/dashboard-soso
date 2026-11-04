@@ -317,6 +317,31 @@ ol.loi li::marker{font-family:var(--f-display);font-weight:800;color:var(--a)}
 .opts button.good{background:color-mix(in oklab,var(--ok) 25%,var(--surface));border-color:var(--ok)}
 .opts button.wrong{background:color-mix(in oklab,var(--danger) 22%,var(--surface));border-color:var(--danger)}
 .q-big{font-family:var(--f-display);font-size:24px;font-weight:700}
+.gcal-f{width:100%;border:0;border-radius:12px;background:#fff;display:block}
+.tr-q{gap:14px}
+.tr-text{font-size:17px;line-height:1.5;font-weight:600}
+.tr-text.sm{font-size:14px}
+.tr-text b{color:var(--a)}
+.seq{display:block;margin-top:10px;font-family:var(--f-display);font-size:24px;font-weight:700;letter-spacing:.02em;white-space:pre-wrap;word-break:break-word}
+.tr-text.sm .seq{font-size:17px;margin-top:4px}
+.figrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.figgrid{display:grid;grid-template-columns:repeat(3,64px);gap:6px;margin-top:12px}
+.fig{width:64px;height:64px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink,currentColor);box-sizing:border-box;padding:2px}
+.fig.qm{display:inline-flex;align-items:center;justify-content:center;font-size:26px;font-weight:700;color:var(--a);border-style:dashed}
+.tr-text.sm .fig{width:44px;height:44px}.tr-text.sm .figgrid{grid-template-columns:repeat(3,44px)}
+.opts.figs{grid-template-columns:repeat(4,minmax(0,84px));justify-content:start}
+.opts.figs button{padding:6px;display:flex;justify-content:center}
+.opts.figs .fig{border:0;background:transparent;width:100%;height:auto;aspect-ratio:1}
+.opts .tr-l{display:inline-block;min-width:22px;color:var(--muted);font-weight:700}
+.tr-time{font-family:var(--f-display);font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;padding:2px 12px;border-radius:10px;background:var(--t)}
+.tr-time.low{color:var(--danger)}
+.tr-ans{display:inline-flex;align-items:center;gap:6px;padding:2px 8px;border-radius:8px;border:1px solid var(--line)}
+.tr-ans.good{border-color:var(--ok)}.tr-ans.wrong{border-color:var(--danger)}
+.tr-ans .fig{width:36px;height:36px;border:0;padding:0;background:transparent}
+.tr-modes{display:grid;gap:10px}
+.tr-mode{display:flex;flex-direction:column;gap:3px;text-align:left;padding:14px 16px;border-radius:14px;border:1px solid var(--line);background:var(--t);cursor:pointer}
+.tr-mode:hover{border-color:var(--a)}
+.tr-mode b{font-family:var(--f-display);font-size:18px}
 
 /* Mobile */
 @media (max-width:820px){
@@ -545,12 +570,12 @@ function temps(s) {
 }
 
 // ---------- État & persistance ----------
-const KEYS = ["todo","agenda","suf","sport","cours","idees","foi","jeux","prefs","docs"];
+const KEYS = ["todo","agenda","suf","sport","cours","idees","foi","jeux","prefs","docs","train"];
 const PAGES = [["","Aucune page"],["suf","SUF · Pôle camp"],["cours","Cours"],["sport","Sport"],["agenda","Agenda"],["evangile","Évangile"]];
 function seed(k) {
   const T = today(), M = monday(T);
   switch (k) {
-    case "prefs": return { name: "Solène", theme: "auto", todoTag: "all", todoView: "liste", sufTab: "plan", ideeTab: "notes", showDone: false, coursSel: "", jeu: "sudoku", examplesRemoved: false };
+    case "prefs": return { name: "Solène", theme: "auto", todoTag: "all", todoView: "liste", sufTab: "plan", ideeTab: "notes", showDone: false, coursSel: "", jeu: "sudoku", examplesRemoved: false, gMode: "", gSel: "all", trCat: "num" };
     case "todo": return {
       tags: [{id:"perso",name:"Perso",h:165,page:""},{id:"suf",name:"SUF",h:135,page:"suf"},{id:"cours",name:"Cours",h:305,page:"cours"},{id:"sport",name:"Sport",h:45,page:"sport"},{id:"admin",name:"Admin",h:220,page:""}],
       tasks: [
@@ -609,6 +634,7 @@ function seed(k) {
     case "foi": return { fav: [], intentions: "" };
     case "jeux": return { sudoku: null, best: { geo: 0, mm: 0, sdk: {} } };
     case "docs": return { files: [] };
+    case "train": return { hist: [] };
   }
 }
 function sufSeed() {
@@ -664,6 +690,8 @@ function migrate() {
   for (const t of S.todo.tasks) if (!t.status) t.status = t.done ? "done" : "todo";
   if (!S.idees.carnet) S.idees.carnet = [{id:uid(),title:"Mon premier carnet",text:"Écris ici librement : un compte rendu de réunion, une réflexion, un brouillon de mail…",at:Date.now(),ex:true}];
   for (const ac of S.agenda.accounts) if (ac.url === undefined) ac.url = "";
+  if (!S.agenda.gcal) S.agenda.gcal = [];
+  if (!S.train || !S.train.hist) S.train = seed("train");
 }
 migrate();
 
@@ -674,7 +702,7 @@ const dirty = new Set(lsGet("dirty") || []);
 const _dAdd = dirty.add.bind(dirty), _dDel = dirty.delete.bind(dirty);
 dirty.add = k => { _dAdd(k); lsSet("dirty", [...dirty]); return dirty; };
 dirty.delete = k => { const r = _dDel(k); lsSet("dirty", [...dirty]); return r; };
-const PAGE_VERSION = "5";
+const PAGE_VERSION = "6";
 function save(k) {
   lsSet(k, S[k]); lsSet("savedAt", Date.now()); if (typeof fileChanged === "function") fileChanged();
   dirty.add(k); if (!COL) return;
@@ -753,7 +781,7 @@ ACT.syncNow = () => { if (!COL) { toast("Pas encore connectée à ton compte"); 
 // ---------- Navigation ----------
 const VIEWS = [
   ["aujourdhui","Aujourd'hui",165,"sun"],["agenda","Agenda",250,"calendar"],["todo","To-do",200,"check"],["suf","SUF · Pôle camp",135,"tent"],
-  ["sport","Sport",45,"dumbbell"],["cours","Cours",305,"book"],["idees","Idées",90,"bulb"],["evangile","Spi",20,"cross"],["jeux","Jeux",340,"dice"]
+  ["sport","Sport",45,"dumbbell"],["cours","Cours",305,"book"],["idees","Idées",90,"bulb"],["evangile","Spi",20,"cross"],["entrainement","Entraînement",285,"target"],["jeux","Jeux",340,"dice"]
 ];
 const cur = () => { const h = location.hash.slice(1); return VIEWS.some(v => v[0] === h) || h === "reglages" ? h : "aujourdhui"; };
 function renderNav() {
@@ -997,6 +1025,7 @@ R.agenda = () => {
   const label = d0.getMonth() === d6.getMonth() ? `${d0.getDate()} – ${d6.getDate()} ${MOIS[d6.getMonth()]}` : `${d0.getDate()} ${MOIS[d0.getMonth()]} – ${d6.getDate()} ${MOIS[d6.getMonth()]}`;
   return head("Agenda", "Ma semaine", `Semaine du ${label} ${d6.getFullYear()}.`,
     `<button class="btn" data-act="wk" data-n="-1" aria-label="Semaine précédente">←</button><button class="btn" data-act="wk" data-n="0">Cette semaine</button><button class="btn" data-act="wk" data-n="1" aria-label="Semaine suivante">→</button>`) +
+  gcalCard() +
   `<div class="week">${days.map(d => { const x = pISO(d); const evs = S.agenda.events.filter(e => e.date === d).sort((a, b) => (a.start || "").localeCompare(b.start || ""));
      const dt = dueOn(d);
      return `<div class="day ${d === T ? "today" : ""}"><div class="day-h"><span>${JC[x.getDay()]}</span><b>${x.getDate()}</b><span class="small muted" style="text-transform:none;letter-spacing:0;font-weight:500">${esc(fete(d))}</span></div>${evs.map(e => evChip(e, true)).join("")}${dt.map(t => `<a class="due-t" style="--h:${t.h}" href="#${t.page}">${ic("check", 13)}<span>${esc(t.title)}</span></a>`).join("")}</div>`; }).join("")}</div>
@@ -1010,6 +1039,7 @@ R.agenda = () => {
       <input type="text" id="e-notes" name="notes" placeholder="Lieu ou note (facultatif)">
       <label class="row small"><input type="checkbox" id="e-g" name="g" checked> Ouvrir aussi Google Agenda pour l'y enregistrer</label>
       <div><button class="btn pri">Ajouter</button></div></form></section>
+  ${gcalSetup()}
   <section class="card"><h2>${ic("link")}Mes comptes Google</h2>
     <p class="muted small">Indique l'adresse Gmail de chaque agenda : les boutons ouvriront directement le bon compte.</p>
     <div class="list">${S.agenda.accounts.map(a => `<div class="item" style="--h:${a.h}"><span class="dot" style="margin-top:12px"></span><div class="body stack" style="gap:6px">
@@ -1020,8 +1050,66 @@ R.agenda = () => {
     <details class="note"><summary>Ajouter un calendrier à partir de son lien</summary>
       <p style="margin-top:8px">Colle le lien dans le champ « Lien du calendrier » : le bouton « Ouvrir l'agenda » t'y emmène. Pour voir ses événements <b>dans</b> cette page, il faut un fichier .ics : ouvre l'adresse iCal du calendrier (Google Agenda › Paramètres › ton agenda › Adresse secrète au format iCal) ou exporte-le, puis dépose le fichier avec « Importer un .ics ». Réimporte-le quand tu veux le mettre à jour : les anciens événements importés sont remplacés.</p></details>
     <details class="note"><summary>Pourquoi mes événements Google ne s'affichent pas tout seuls ?</summary>
-      <p style="margin-top:8px">Pour protéger tes données, cette page ne peut ni intégrer Google Agenda ni lire tes comptes. Elle garde donc son propre agenda, et chaque rendez-vous a un bouton <b>« Copier dans Google »</b> qui ouvre Google Agenda sur le bon compte avec le formulaire déjà rempli. Les boutons <b>« Ouvrir dans Google Agenda »</b> t'emmènent directement à la semaine affichée, compte par compte.</p></details></section></div>`;
+      <p style="margin-top:8px">Sur ton site, colle le code d'intégration de chaque agenda dans « Mes agendas Google affichés ici » : ils apparaissent en haut de la page. Dans Claude, la page ne peut pas les intégrer. Les rendez-vous ajoutés ici restent dans le carnet, et chaque rendez-vous a un bouton <b>« Copier dans Google »</b> qui ouvre Google Agenda sur le bon compte avec le formulaire déjà rempli. Les boutons <b>« Ouvrir dans Google Agenda »</b> t'emmènent directement à la semaine affichée, compte par compte.</p></details></section></div>`;
 };
+// Agendas Google intégrés (code d'intégration collé depuis Google Agenda)
+const GCAL_OK = () => !!window.SITE_CONFIG || !(window.claude && window.claude.use);
+function gcalParse(txt) {
+  txt = String(txt || "").trim(); if (!txt) return {err:"Colle d'abord le code ou le lien."};
+  const m = txt.match(/src\s*=\s*["']([^"']+)["']/i); let u = (m ? m[1] : txt).replace(/&amp;/g, "&").trim();
+  if (/\.ics(\?|$)|\/ical\//i.test(u)) return {err:"C'est l'adresse iCal (.ics). Il faut plutôt le « Code d'intégration » (il commence par <iframe). Tu peux aussi importer ce fichier .ics plus bas."};
+  if (!/^https?:/i.test(u) && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(u)) u = "https://calendar.google.com/calendar/embed?src=" + encodeURIComponent(u);
+  let x; try { x = new URL(u); } catch { return {err:"Je ne reconnais pas ce code. Copie tout le bloc « Code d'intégration » de Google Agenda."}; }
+  if (x.hostname !== "calendar.google.com" || !/^\/calendar\/(u\/\d+\/)?embed/.test(x.pathname)) return {err:"Ce lien ne vient pas de Google Agenda (il doit contenir calendar.google.com/calendar/embed)."};
+  if (!x.searchParams.getAll("src").length && !x.searchParams.get("cid")) return {err:"Ce code ne contient aucun agenda (paramètre src manquant)."};
+  x.protocol = "https:"; return {url: x.toString()};
+}
+function gcalUrl(list) {
+  const x = new URL(list[0].url), seen = new Set(x.searchParams.getAll("src"));
+  for (const g of list.slice(1)) { const y = new URL(g.url), cols = y.searchParams.getAll("color");
+    y.searchParams.getAll("src").forEach((s, i) => { if (seen.has(s)) return; seen.add(s); x.searchParams.append("src", s); if (cols[i]) x.searchParams.append("color", cols[i]); }); }
+  const mode = S.prefs.gMode || (innerWidth < 640 ? "AGENDA" : "WEEK");
+  x.searchParams.set("mode", mode); x.searchParams.set("hl", "fr");
+  if (!x.searchParams.get("ctz")) x.searchParams.set("ctz", Intl.DateTimeFormat().resolvedOptions().timeZone || "Europe/Paris");
+  if (!x.searchParams.get("wkst")) x.searchParams.set("wkst", "2");
+  return x.toString();
+}
+function gcalCard() {
+  const G = S.agenda.gcal; if (!G.length) return "";
+  const sel = S.prefs.gSel === "all" || !G.some(g => g.id === S.prefs.gSel) ? "all" : S.prefs.gSel;
+  const list = sel === "all" ? G : G.filter(g => g.id === sel);
+  const mode = S.prefs.gMode || (innerWidth < 640 ? "AGENDA" : "WEEK");
+  return `<section class="card gcal"><h2>${ic("calendar")}Google Agenda</h2>
+    <div class="row"><div class="tabs">${G.length > 1 ? `<button data-act="gSel" data-k="all" aria-pressed="${sel === "all"}">Tous</button>` : ""}${G.map(g => `<button data-act="gSel" data-k="${g.id}" aria-pressed="${G.length === 1 || sel === g.id}">${esc(g.name)}</button>`).join("")}</div><span class="spacer"></span>
+    <div class="tabs">${[["WEEK","Semaine"],["MONTH","Mois"],["AGENDA","Liste"]].map(([k, n]) => `<button data-act="gMode" data-k="${k}" aria-pressed="${mode === k}">${n}</button>`).join("")}</div></div>
+    ${GCAL_OK() ? `<iframe class="gcal-f" src="${esc(gcalUrl(list))}" title="Google Agenda" loading="lazy" style="height:${mode === "AGENDA" ? 480 : 640}px"></iframe>`
+      : `<p class="muted">Ici, dans Claude, Google Agenda ne peut pas s'afficher. Ouvre ton site : tes agendas y apparaissent à cet endroit.</p>`}
+    <p class="muted small">Rien ne s'affiche ou Google te demande de te connecter ? Connecte-toi à Google dans ce navigateur (sur iPhone, Safari bloque souvent les agendas privés : ouvre-les avec « Ouvrir l'agenda »).</p></section>`;
+}
+let gcalErr = "", gcalDraft = {n:"", c:""};
+function gcalSetup() {
+  const G = S.agenda.gcal;
+  return `<section class="card"><h2>${ic("calendar")}Mes agendas Google affichés ici</h2>
+    ${G.length ? `<div class="list">${G.map(g => `<div class="item" style="align-items:center"><input type="text" id="gc-n-${g.id}" value="${esc(g.name)}" data-in="gcName" data-id="${g.id}" aria-label="Nom de l'agenda" style="flex:1 1 120px;font-weight:600"><span class="small muted">${new URL(g.url).searchParams.getAll("src").length} calendrier${new URL(g.url).searchParams.getAll("src").length > 1 ? "s" : ""}</span><button class="x" data-act="gcDel" data-id="${g.id}">Retirer</button></div>`).join("")}</div>` : `<p class="muted small">Aucun pour l'instant. Colle le code d'intégration d'un agenda : il s'affichera en haut de cette page, sur ton site.</p>`}
+    <form class="stack" data-form="gcAdd">
+      <input type="text" id="gc-name" name="n" value="${esc(gcalDraft.n)}" placeholder="Nom (ex. Perso, SUF, Fac)" required>
+      <textarea id="gc-code" name="c" rows="3" placeholder='Colle ici le code d&#39;intégration : &lt;iframe src="https://calendar.google.com/calendar/embed?src=…"&gt;&lt;/iframe&gt;' required>${esc(gcalDraft.c)}</textarea>
+      ${gcalErr ? `<p class="small" style="color:var(--danger)">${esc(gcalErr)}</p>` : ""}
+      <div><button class="btn pri">Ajouter cet agenda</button></div></form>
+    <details class="note"><summary>Où trouver le code d'intégration ?</summary>
+      <p style="margin-top:8px">Sur un ordinateur, ouvre Google Agenda › roue dentée › <b>Paramètres</b> › dans la colonne de gauche, clique sur ton agenda (sous « Paramètres de mes agendas ») › section <b>« Intégrer l'agenda »</b> › copie le <b>Code d'intégration</b> (il commence par &lt;iframe). Le bouton « Personnaliser » permet d'y ajouter plusieurs agendas d'un coup.</p>
+      <p>Tu peux coller un code par compte Google : le bouton « Tous » les superpose dans une seule vue.</p>
+      <p>Un agenda privé ne s'affiche que si tu es connectée au bon compte Google dans le navigateur. Évite de rendre un agenda public juste pour ça.</p></details></section>`;
+}
+FORM.gcAdd = (f, d) => {
+  const r = gcalParse(d.get("c")); if (r.err) { gcalErr = r.err; gcalDraft = {n:d.get("n"), c:d.get("c")}; return; }
+  gcalErr = ""; gcalDraft = {n:"", c:""}; const g = {id:uid(), name:d.get("n") || "Agenda", url:r.url};
+  S.agenda.gcal.push(g); S.prefs.gSel = "all"; save("agenda"); save("prefs"); toast("Agenda ajouté"); window.scrollTo({top:0, behavior:"smooth"});
+};
+ACT.gcDel = el => { S.agenda.gcal = S.agenda.gcal.filter(g => g.id !== el.dataset.id); save("agenda"); };
+ACT.gSel = el => { S.prefs.gSel = el.dataset.k; save("prefs"); };
+ACT.gMode = el => { S.prefs.gMode = el.dataset.k; save("prefs"); };
+IN.gcName = el => { const g = S.agenda.gcal.find(x => x.id === el.dataset.id); if (g) { g.name = el.value; save("agenda"); } return false; };
 ACT.wk = el => { const n = +el.dataset.n; weekOff = n === 0 ? 0 : weekOff + n; };
 ACT.evDel = el => { S.agenda.events = S.agenda.events.filter(e => e.id !== el.dataset.id); save("agenda"); };
 ACT.accDel = el => { if (S.agenda.accounts.length <= 1) return toast("Garde au moins un agenda"); S.agenda.accounts = S.agenda.accounts.filter(a => a.id !== el.dataset.id); save("agenda"); };
@@ -1624,6 +1712,307 @@ async function siteConnect() {
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && COL && SB_USER) COL.getAll().then(rows => { let ch = false; rows.forEach(r => { if (KEYS.includes(r.key) && !timers[r.key] && !writing[r.key] && !dirty.has(r.key) && r.at !== echo[r.key] && JSON.stringify(r.v) !== JSON.stringify(S[r.key])) { S[r.key] = r.v; lsSet(r.key, r.v); ch = true; } }); if (ch) { migrate(); softRender(); } }).catch(() => {}); });
 if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(() => {});
 ACT.syncNow = () => { if (!COL) { if (SB_USER) { siteConnect(); toast("Nouvel essai de connexion…"); } else loginView(); return false; } KEYS.forEach(k => flush(k)); toast("Synchronisation lancée"); return false; };
+// ---------- Entraînement : tests de logique (suites, verbal, formes, raisonnement) ----------
+// Questions originales, générées à chaque partie, dans l'esprit des tests d'aptitude chronométrés (type Predictive Index).
+const rnd = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
+const pick = a => a[Math.floor(Math.random() * a.length)];
+const nf = n => String(Math.round(n * 100) / 100).replace(".", ",");
+const TR_CATS = [["num","Numérique",250],["verb","Verbal",20],["abs","Formes",305],["logi","Raisonnement",135]];
+const TR_MODES = {test:{n:50, sec:720, label:"Test complet"}, rapide:{n:15, sec:240, label:"Test rapide"}, theme:{n:10, sec:0, label:"Par thème"}};
+// Options : la bonne réponse + 3 (ou plus) intrus distincts, mélangés
+function mkOpts(good, wrongs, n = 4) {
+  const g = String(good), w = shuffle([...new Set(wrongs.map(String))].filter(x => x !== g)).slice(0, n - 1);
+  const opts = shuffle([g, ...w]); return {opts, a: opts.indexOf(g)};
+}
+
+// --- Numérique ---
+function qSeries() {
+  const t = rnd(0, 6); let s = [], why = "";
+  if (t === 0) { const a = rnd(2, 40), d = pick([-7,-6,-5,-4,-3,3,4,5,6,7,8,9,11,12,15]); for (let i = 0; i < 6; i++) s.push(a + d * i); why = `On ${d > 0 ? "ajoute" : "retire"} ${Math.abs(d)} à chaque fois.`; }
+  else if (t === 1) { const a = rnd(1, 5), r = pick([2, 3]); for (let i = 0; i < 5; i++) s.push(a * r ** i); why = `Chaque nombre est multiplié par ${r}.`; }
+  else if (t === 2) { const d = rnd(1, 4), k = rnd(1, 3); let x = rnd(1, 20); for (let i = 0; i < 6; i++) { s.push(x); x += d + k * i; } why = `L'écart grandit de ${k} à chaque fois : +${d}, +${d + k}, +${d + 2 * k}…`; }
+  else if (t === 3) { const p = rnd(2, 6), q = pick([2, 3]); let x = rnd(1, 9); for (let i = 0; i < 6; i++) { s.push(x); x = i % 2 === 0 ? x + p : x * q; } why = `On ajoute ${p}, puis on multiplie par ${q}, et on recommence.`; }
+  else if (t === 4) { const a = rnd(1, 10), d = rnd(2, 5), b = rnd(25, 45), e = rnd(1, 4); for (let i = 0; i < 7; i++) s.push(i % 2 === 0 ? a + d * (i / 2) : b - e * ((i - 1) / 2)); why = `Deux suites s'alternent : une qui monte de ${d} (${s[0]}, ${s[2]}, ${s[4]}…) et une qui descend de ${e}.`; }
+  else if (t === 5) { const o = rnd(1, 6), c = pick([0, 0, 1, -1, 2]); for (let i = 0; i < 6; i++) s.push((o + i) ** 2 + c); why = `Ce sont les carrés ${o}², ${o + 1}², ${o + 2}²…${c ? (c > 0 ? " plus " : " moins ") + Math.abs(c) : ""}.`; }
+  else { s = [rnd(1, 4), rnd(1, 5)]; while (s.length < 7) s.push(s[s.length - 1] + s[s.length - 2]); why = "Chaque nombre est la somme des deux précédents."; }
+  const ans = s.pop(), d1 = s[s.length - 1] - s[s.length - 2];
+  return {cat:"num", kind:"Suite de nombres", q:`Quel nombre vient ensuite ?<span class="seq">${s.join("  ·  ")}  ·  ?</span>`, ...mkOpts(ans, [ans + 1, ans - 1, ans + 2, ans - 2, s[s.length - 1] + d1, ans + d1, ans - d1, ans + 10, ans * 2]), why};
+}
+function qCalc() {
+  const t = rnd(0, 6);
+  if (t === 0) { const p = pick([20,40,60,80,120,150,200,250]), x = pick([10,20,25,30,40]), r = p * x / 100, a = p - r;
+    return {cat:"num", kind:"Calcul", q:`Un article coûte ${p} €. Il est soldé à −${x} %. Quel est son nouveau prix ?`, ...mkOpts(nf(a) + " €", [p - x, r, a + 5, a - 5, a + 10, p + r].map(v => nf(v) + " €")), why:`${x} % de ${p} € = ${nf(r)} €, donc ${p} − ${nf(r)} = ${nf(a)} €.`}; }
+  if (t === 1) { const n = rnd(2, 5), u = pick([0.5, 0.8, 1.2, 1.5, 2.5, 3]), m = rnd(6, 12), a = m * u;
+    return {cat:"num", kind:"Calcul", q:`${n} cahiers coûtent ${nf(n * u)} €. Combien coûtent ${m} cahiers ?`, ...mkOpts(nf(a) + " €", [a + u, a - u, n * u * m / 2, a + 1, a - 1, n * u + m].map(v => nf(v) + " €")), why:`Un cahier coûte ${nf(n * u)} ÷ ${n} = ${nf(u)} €, donc ${m} × ${nf(u)} = ${nf(a)} €.`}; }
+  if (t === 2) { let v, m; do { v = pick([30,40,60,80,90,120]); m = pick([10,15,20,30,40,45,90]); } while ((v * m) % 60); const a = v * m / 60;
+    return {cat:"num", kind:"Calcul", q:`Une voiture roule à ${v} km/h. Combien de kilomètres parcourt-elle en ${m} minutes ?`, ...mkOpts(a + " km", [a + 5, a - 5, a * 2, a + 10, Math.round(v / m), v - m].filter(x => x > 0).map(x => x + " km")), why:`En 1 minute elle fait ${nf(v / 60)} km (${v} ÷ 60), donc en ${m} minutes : ${a} km.`}; }
+  if (t === 3) { let p, h, p2; do { p = pick([2,3,4,6]); h = pick([4,6,8,12]); p2 = pick([2,3,4,6,8,12]); } while (p2 === p || (p * h) % p2); const a = p * h / p2;
+    return {cat:"num", kind:"Calcul", q:`${p} personnes font un travail en ${h} heures. Combien d'heures faut-il à ${p2} personnes, au même rythme ?`, ...mkOpts(a + " h", [h * p2 / p, h + p2 - p, a + 1, a - 1, a * 2, h].filter(x => x > 0 && x === Math.round(x)).map(x => x + " h")), why:`Le travail représente ${p} × ${h} = ${p * h} heures de travail, à partager entre ${p2} : ${a} h.`}; }
+  if (t === 4) { const den = pick([3,4,5,6,8]), num = rnd(1, den - 1), base = den * rnd(3, 12), a = base * num / den;
+    return {cat:"num", kind:"Calcul", q:`Combien font les ${num}/${den} de ${base} ?`, ...mkOpts(a, [base / den, a + base / den, a - base / den, base - a, a + 2, a * 2].filter(x => x > 0 && x === Math.round(x))), why:`${base} ÷ ${den} = ${base / den}, puis × ${num} = ${a}.`}; }
+  if (t === 5) { const k = rnd(3, 9), ms = shuffle([...Array(12)].map((_, i) => k * (i + 2))).slice(0, 4); let x; do { x = k * rnd(3, 12) + rnd(1, k - 1); } while (ms.includes(x) || TR_DIV.some(d => d !== k && ms.every(m => m % d === 0) && x % d === 0));
+    const opts = shuffle([...ms, x].map(String)); return {cat:"num", kind:"Intrus", q:"Quel nombre est l'intrus ?", opts, a: opts.indexOf(String(x)), why:`Tous sont des multiples de ${k} (table de ${k}), sauf ${x}.`}; }
+  let M, a, b, c; do { M = rnd(8, 30); a = rnd(2, 40); b = rnd(2, 40); c = 3 * M - a - b; } while (c <= 0);
+  return {cat:"num", kind:"Calcul", q:`La moyenne de trois nombres est ${M}. Deux d'entre eux sont ${a} et ${b}. Quel est le troisième ?`, ...mkOpts(c, [M, c + 3, c - 3, 2 * M - a - b, c + 1, Math.abs(M - a)].filter(x => x > 0)), why:`La somme des trois vaut 3 × ${M} = ${3 * M}, donc ${3 * M} − ${a} − ${b} = ${c}.`};
+}
+const TR_DIV = [2,3,4,5,6,7,8,9];
+
+// --- Verbal ---
+const TR_ANA = [
+  ["chaud","froid","haut","bas",["loin","grand","élevé"]],["pied","chaussure","main","gant",["doigt","bague","bras"]],
+  ["oiseau","nid","abeille","ruche",["miel","fleur","essaim"]],["livre","lire","musique","écouter",["chanter","note","danser"]],
+  ["peintre","pinceau","écrivain","stylo",["roman","lecteur","page"]],["été","hiver","jour","nuit",["soleil","matin","semaine"]],
+  ["eau","soif","nourriture","faim",["repas","cuisine","manger"]],["médecin","patient","professeur","élève",["école","cours","savoir"]],
+  ["minute","heure","mois","année",["jour","semaine","siècle"]],["œil","voir","oreille","entendre",["parler","son","toucher"]],
+  ["arbre","forêt","étoile","galaxie",["ciel","lune","nuit"]],["chien","aboyer","chat","miauler",["griffer","souris","dormir"]],
+  ["capitaine","navire","pilote","avion",["aéroport","ciel","vol"]],["graine","plante","œuf","poussin",["poule","nid","coquille"]],
+  ["blé","pain","raisin","vin",["vigne","fruit","bouteille"]],["juge","tribunal","acteur","théâtre",["rôle","spectateur","film"]],
+  ["thermomètre","température","balance","poids",["taille","cuisine","mesure"]],["page","livre","maillon","chaîne",["anneau","métal","collier"]],
+  ["avare","argent","gourmand","nourriture",["faim","appétit","dessert"]],["triangle","trois","hexagone","six",["cinq","huit","carré"]],
+  ["boussole","direction","horloge","heure",["aiguille","temps","réveil"]],["rare","fréquent","précis","vague",["exact","net","juste"]],
+  ["auteur","roman","compositeur","symphonie",["orchestre","piano","chef"]],["dent","dentiste","cœur","cardiologue",["pharmacien","infirmier","chirurgien"]],
+  ["cheval","écurie","vache","étable",["prairie","lait","ferme"]],["silence","bruit","obscurité","lumière",["nuit","ombre","calme"]],
+  ["semer","récolter","apprendre","savoir",["étudier","école","oublier"]],["affirmer","nier","accepter","refuser",["admettre","recevoir","donner"]],
+  ["lent","rapide","tortue","lièvre",["escargot","course","renard"]],["goutte","océan","grain","désert",["sable","plage","dune"]],
+  ["sculpteur","statue","architecte","bâtiment",["plan","ville","maçon"]],["voiture","garage","bateau","port",["mer","voile","quai"]]
+];
+const TR_CONTR = [
+  ["prolixe","concis",["bavard","prospère","lent"]],["éphémère","durable",["fragile","rapide","rare"]],["généreux","avare",["riche","modeste","prodigue"]],
+  ["optimiste","pessimiste",["réaliste","joyeux","naïf"]],["abondance","pénurie",["richesse","surplus","excès"]],["précoce","tardif",["rapide","jeune","doué"]],
+  ["docile","rebelle",["obéissant","calme","timide"]],["superflu","indispensable",["inutile","excessif","léger"]],["clarté","obscurité",["netteté","lumière","pureté"]],
+  ["modeste","prétentieux",["humble","simple","pauvre"]],["fragile","solide",["délicat","cassant","léger"]],["accélérer","ralentir",["avancer","foncer","démarrer"]],
+  ["antérieur","postérieur",["précédent","intérieur","supérieur"]],["consentir","refuser",["accepter","permettre","céder"]],["hostile","bienveillant",["agressif","méfiant","indifférent"]],
+  ["négligent","consciencieux",["distrait","paresseux","oublieux"]],["innocent","coupable",["naïf","pur","victime"]],["éloge","critique",["compliment","discours","louange"]],
+  ["unanime","divisé",["d'accord","commun","total"]],["éparpiller","rassembler",["disperser","semer","jeter"]],["sobre","extravagant",["simple","discret","modéré"]]
+];
+const TR_SYN = [
+  ["prompt","rapide",["lent","léger","tardif"]],["perspicace","clairvoyant",["obstiné","naïf","distrait"]],["pérenne","durable",["annuel","fragile","récent"]],
+  ["probe","honnête",["probable","fier","habile"]],["véloce","rapide",["lourd","prudent","fatigué"]],["candide","naïf",["rusé","blanc","triste"]],
+  ["fallacieux","trompeur",["évident","facile","vrai"]],["loquace","bavard",["discret","drôle","lent"]],["ardu","difficile",["simple","brûlant","haut"]],
+  ["désuet","démodé",["désert","moderne","utile"]],["exhaustif","complet",["épuisé","partiel","rapide"]],["sagace","perspicace",["sage","sauvage","bavard"]],
+  ["réticent","hésitant",["enthousiaste","résistant","silencieux"]],["tenace","obstiné",["tendre","fragile","temporaire"]],["insipide","fade",["insolent","savoureux","piquant"]],
+  ["minutieux","méticuleux",["rapide","négligent","minuscule"]],["intègre","honnête",["intégré","rusé","sévère"]],["fortuit","accidentel",["fort","prévu","gratuit"]],
+  ["acerbe","mordant",["acide","doux","timide"]],["austère","sévère",["riche","joyeux","austral"]]
+];
+const TR_INTRUS = [
+  [["pomme","poire","carotte","cerise","prune"],"carotte","C'est un légume, les autres sont des fruits."],
+  [["Paris","Lyon","Genève","Marseille","Lille"],"Genève","C'est une ville suisse, les autres sont françaises."],
+  [["violon","guitare","harpe","flûte","violoncelle"],"flûte","C'est un instrument à vent, les autres sont à cordes."],
+  [["carré","triangle","cercle","rectangle","losange"],"cercle","Il n'a pas de côtés droits."],
+  [["aigle","autruche","moineau","corbeau","hirondelle"],"autruche","Elle ne vole pas."],
+  [["lundi","mardi","mars","jeudi","samedi"],"mars","C'est un mois, les autres sont des jours."],
+  [["chêne","sapin","hêtre","rose","bouleau"],"rose","Ce n'est pas un arbre."],
+  [["Mercure","Vénus","Lune","Mars","Jupiter"],"Lune","C'est un satellite, les autres sont des planètes."],
+  [["courir","sauter","nager","rapide","marcher"],"rapide","C'est un adjectif, les autres sont des verbes."],
+  [["dauphin","baleine","requin","phoque","orque"],"requin","C'est un poisson, les autres sont des mammifères."],
+  [["heureux","joyeux","content","ravi","morose"],"morose","Il veut dire triste, les autres expriment la joie."],
+  [["Rome","Madrid","Berlin","Barcelone","Lisbonne"],"Barcelone","Ce n'est pas une capitale."],
+  [["bus","train","métro","vélo","tramway"],"vélo","Ce n'est pas un transport en commun."],
+  [["cuivre","fer","argent","bois","zinc"],"bois","Ce n'est pas un métal."],
+  [["stylo","crayon","feutre","gomme","craie"],"gomme","Elle n'écrit pas, elle efface."],
+  [["cœur","foie","poumon","rein","coude"],"coude","C'est une articulation, les autres sont des organes."],
+  [["lion","tigre","loup","guépard","panthère"],"loup","Ce n'est pas un félin."],
+  [["Picasso","Monet","Van Gogh","Mozart","Matisse"],"Mozart","C'est un compositeur, les autres sont des peintres."],
+  [["kilomètre","mètre","litre","centimètre","millimètre"],"litre","Il mesure un volume, les autres des longueurs."],
+  [["Seine","Loire","Rhône","Garonne","Alpes"],"Alpes","Ce sont des montagnes, les autres sont des fleuves."]
+];
+const wb = s => `<b>${esc(s)}</b>`;
+function qVerbal() {
+  const t = rnd(0, 3);
+  if (t === 0) { const [a, b, c, d, wr] = pick(TR_ANA); return {cat:"verb", kind:"Analogie", q:`${wb(a)} est à ${wb(b)} ce que ${wb(c)} est à… ?`, ...mkOpts(esc(d), wr.map(esc)), why:`${a[0].toUpperCase() + a.slice(1)} → ${b} et ${c} → ${d} : c'est la même relation.`}; }
+  if (t === 1) { const [x, a, wr] = pick(TR_CONTR); return {cat:"verb", kind:"Contraire", q:`Quel mot est le contraire de ${wb(x)} ?`, ...mkOpts(esc(a), wr.map(esc)), why:`« ${x} » s'oppose à « ${a} ».`}; }
+  if (t === 2) { const [x, a, wr] = pick(TR_SYN); return {cat:"verb", kind:"Synonyme", q:`Quel mot a le sens le plus proche de ${wb(x)} ?`, ...mkOpts(esc(a), wr.map(esc)), why:`« ${x} » veut dire « ${a} ».`}; }
+  const [l, a, why] = pick(TR_INTRUS), opts = shuffle(l).map(esc); return {cat:"verb", kind:"Intrus", q:"Quel mot est l'intrus ?", opts, a: opts.indexOf(esc(a)), why:`${a} : ${why}`};
+}
+
+// --- Formes (figures en SVG) ---
+const SH = {circle:'<circle r="10"/>', square:'<rect x="-9" y="-9" width="18" height="18" rx="1.5"/>', tri:'<path d="M0-11L10.5 8H-10.5z"/>',
+  cross:'<path d="M-3.5-11h7v7.5H11v7H3.5V11h-7V3.5H-11v-7h7.5z"/>', arrow:'<path d="M0-13L10-2H3.5v13h-7V-2H-10z"/>'};
+const SH_NAME = {circle:"rond", square:"carré", tri:"triangle", cross:"croix", arrow:"flèche"};
+const LAY = {1:[[30,30]], 2:[[18,30],[42,30]], 3:[[30,17],[17,42],[43,42]], 4:[[18,18],[42,18],[18,42],[42,42]], 5:[[16,16],[44,16],[30,30],[16,44],[44,44]], 6:[[16,19],[30,19],[44,19],[16,41],[30,41],[44,41]]};
+const CORN = [[9,9],[51,9],[51,51],[9,51]];
+function fig(f) {
+  const sc = f.n === 1 ? 1.25 : f.n <= 4 ? .78 : .58;
+  const shapes = LAY[f.n].map(([x, y]) => `<g transform="translate(${x} ${y}) scale(${sc}) rotate(${f.rot})">${SH[f.sh]}</g>`).join("");
+  return `<svg class="fig" viewBox="0 0 60 60" aria-hidden="true"><g fill="${f.fill ? "currentColor" : "none"}" stroke="currentColor" stroke-width="${f.n === 1 ? 1.8 : 2.4}" stroke-linejoin="round">${shapes}</g>${f.pos >= 0 ? `<circle cx="${CORN[f.pos][0]}" cy="${CORN[f.pos][1]}" r="4" fill="currentColor"/>` : ""}</svg>`;
+}
+const fkey = f => [f.sh, f.n, ((f.rot % 360) + 360) % 360, f.fill, f.pos].join();
+function qSeqFig() {
+  const pairs = [["rot","fill"],["rot","pos"],["rot","n"],["sh","fill"],["sh","pos"],["sh","n"],["n","fill"],["fill","pos"],["rot","fill","pos"],["sh","fill","pos"]];
+  const R = pick(pairs), has = k => R.includes(k);
+  const step = pick([45, 90, -90, 135]), cyc = shuffle(["circle","square","tri","cross"]).slice(0, 3), dir = pick([1, 3]);
+  const base = {sh: has("rot") ? "arrow" : pick(["circle","square","tri","cross"]), n: has("n") ? 1 : has("pos") ? 1 : rnd(1, 2), rot: has("rot") ? pick([0, 90, 180]) : 0, fill: rnd(0, 1), pos: has("pos") ? rnd(0, 3) : -1};
+  const at = i => ({sh: has("sh") ? cyc[i % 3] : base.sh, n: has("n") ? base.n + i : base.n, rot: has("rot") ? base.rot + step * i : base.rot, fill: has("fill") ? (base.fill + i) % 2 : base.fill, pos: has("pos") ? (base.pos + dir * i) % 4 : base.pos});
+  const ans = at(4), cands = [];
+  if (has("rot")) cands.push({...ans, rot: ans.rot + step}, {...ans, rot: ans.rot - step}, {...ans, rot: ans.rot + 180});
+  if (has("sh")) cyc.forEach(s => cands.push({...ans, sh: s}));
+  if (has("n")) cands.push({...ans, n: ans.n - 1}, {...ans, n: Math.min(6, ans.n + 1)});
+  cands.push({...ans, fill: 1 - ans.fill});
+  if (has("pos")) [0,1,2,3].forEach(p => cands.push({...ans, pos: p}));
+  if (cands.length < 6) cands.push({...ans, fill: 1 - ans.fill, rot: ans.rot + 90}, {...ans, n: ans.n + 1});
+  const seen = new Set([fkey(ans)]), wrong = [];
+  for (const c of shuffle(cands)) { const k = fkey(c); if (!seen.has(k) && wrong.length < 3) { seen.add(k); wrong.push(c); } }
+  const all = shuffle([ans, ...wrong]);
+  const rules = R.map(k => ({rot:`la flèche tourne de ${Math.abs(step)}° ${step > 0 ? "dans le sens des aiguilles d'une montre" : "dans le sens inverse"}`, sh:`la forme suit le cycle ${cyc.map(s => SH_NAME[s]).join(" → ")}`, n:"il y a une forme de plus à chaque case", fill:"le remplissage alterne (plein, vide…)", pos:`le point avance d'un coin ${dir === 1 ? "dans le sens des aiguilles d'une montre" : "dans le sens inverse"}`}[k]));
+  return {cat:"abs", kind:"Suite de figures", q:`Quelle figure vient ensuite ?<span class="figrow">${[0,1,2,3].map(i => fig(at(i))).join("")}<span class="fig qm">?</span></span>`, opts: all.map(fig), a: all.indexOf(ans), fig: true,
+    why: rules.join(", et ").replace(/^./, c => c.toUpperCase()) + "."};
+}
+function qGridFig() {
+  const sh = shuffle(["circle","square","tri","cross"]).slice(0, 3), ns = pick([[1,2,3],[1,3,5],[2,3,4]]), fl = rnd(0, 1), byRow = rnd(0, 1);
+  const cell = (r, c) => ({sh: sh[byRow ? r : c], n: ns[byRow ? c : r], rot: 0, fill: fl, pos: -1});
+  const ans = cell(2, 2), cands = [cell(2, 1), cell(1, 2), cell(1, 1), cell(0, 2), cell(2, 0), {...ans, fill: 1 - fl}, {...ans, n: ans.n + 1}];
+  const seen = new Set([fkey(ans)]), wrong = [];
+  for (const c of shuffle(cands)) { const k = fkey(c); if (!seen.has(k) && wrong.length < 3) { seen.add(k); wrong.push(c); } }
+  const all = shuffle([ans, ...wrong]);
+  const grid = [0,1,2].map(r => [0,1,2].map(c => r === 2 && c === 2 ? `<span class="fig qm">?</span>` : fig(cell(r, c))).join("")).join("");
+  return {cat:"abs", kind:"Grille de figures", q:`Quelle figure complète la grille ?<span class="figgrid">${grid}</span>`, opts: all.map(fig), a: all.indexOf(ans), fig: true,
+    why:`Chaque ${byRow ? "ligne" : "colonne"} garde la même forme, et le nombre de formes change de la même façon dans chaque ${byRow ? "ligne" : "colonne"} (${ns.join(", ")}). Il manque donc ${ans.n} ${SH_NAME[ans.sh]}${ans.n > 1 && ans.sh !== "cross" ? "s" : ""}.`};
+}
+
+// --- Raisonnement ---
+const AL = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+function qLetters() {
+  if (rnd(0, 2) === 0) { const s = rnd(0, 6), k = rnd(1, 2), seq = [0,1,2,3].map(i => AL[s + k * i] + AL[25 - s - k * i]), a = AL[s + 4 * k] + AL[25 - s - 4 * k];
+    return {cat:"logi", kind:"Suite de lettres", q:`Quelle paire vient ensuite ?<span class="seq">${seq.join("  ·  ")}  ·  ?</span>`, ...mkOpts(a, [AL[s + 4 * k] + AL[26 - s - 4 * k], AL[s + 4 * k + 1] + AL[25 - s - 4 * k], AL[s + 3 * k] + AL[25 - s - 4 * k], AL[25 - s - 4 * k] + AL[s + 4 * k]]), why:`La première lettre avance de ${k} et la seconde recule de ${k} dans l'alphabet.`}; }
+  const k = pick([2, 3, 4, 5, -2, -3]), s = k > 0 ? rnd(0, 25 - 5 * k) : rnd(-5 * k, 25), seq = [0,1,2,3,4].map(i => AL[s + k * i]), a = AL[s + 5 * k];
+  const near = [s + 5 * k + 1, s + 5 * k - 1, s + 4 * k, s + 5 * k + (k > 0 ? 1 : -1) * 2, s + 6 * k].filter(i => i >= 0 && i < 26).map(i => AL[i]);
+  return {cat:"logi", kind:"Suite de lettres", q:`Quelle lettre vient ensuite ?<span class="seq">${seq.join("  ·  ")}  ·  ?</span>`, ...mkOpts(a, near), why:`On ${k > 0 ? "avance" : "recule"} de ${Math.abs(k)} lettres à chaque fois (${seq.slice(0, 2).join(" → ")}…).`};
+}
+const NOMS = ["Anna","Bastien","Claire","Damien","Élise","Félix","Inès","Hugo","Léa","Malo"];
+const REL = [["arrive avant","arrive en premier","arrive en dernier"],["a plus de livres que","a le plus de livres","a le moins de livres"],["court plus vite que","court le plus vite","court le moins vite"],["gagne plus que","gagne le plus","gagne le moins"]];
+const qu = s => s.replace(/\bque ([AEÉIOU])/g, "qu'$1");
+function qOrder() {
+  const n = pick([4, 4, 5]), who = shuffle(NOMS).slice(0, n), [rel, most, least] = pick(REL), top = rnd(0, 1);
+  const facts = shuffle([...Array(n - 1)].map((_, i) => `${who[i]} ${rel} ${who[i + 1]}`));
+  const opts = shuffle(who.slice()); const a = top ? who[0] : who[n - 1];
+  return {cat:"logi", kind:"Classement", q:qu(`${facts.join(". ")}.<br>Qui ${top ? most : least} ?`), opts, a: opts.indexOf(a), why:`Dans l'ordre : ${who.join(", ")}.`};
+}
+const VFI = ["Vrai","Faux","Impossible à dire"];
+function qDeduce() {
+  const [x, y, z] = shuffle(NOMS).slice(0, 3), [rel] = pick(REL), t = rnd(0, 3);
+  const F = [[`${x} ${rel} ${y}`, `${y} ${rel} ${z}`], [`${x} ${rel} ${y}`, `${y} ${rel} ${z}`], [`${x} ${rel} ${y}`, `${x} ${rel} ${z}`], [`${x} ${rel} ${y}`, `${z} ${rel} ${y}`]][t];
+  const C = [`${x} ${rel} ${z}`, `${z} ${rel} ${x}`, `${y} ${rel} ${z}`, `${x} ${rel} ${z}`][t], A = [0, 1, 2, 2][t];
+  const why = [`L'ordre est ${x}, ${y}, ${z} : c'est donc vrai.`, `L'ordre est ${x}, ${y}, ${z} : ${z} vient après ${x}, c'est faux.`, `On sait seulement que ${x} devance les deux autres : rien ne dit qui de ${y} ou ${z} passe devant.`, `${x} et ${z} devancent tous les deux ${y}, mais on ne sait pas lequel des deux passe devant.`][t];
+  return {cat:"logi", kind:"Déduction", q:qu(`${F.join(". ")}.<br>Donc : « ${C} ».`), opts: VFI, a: A, why};
+}
+const TR_MOTS = [["glim","glims"],["torp","torps"],["vaze","vazes"],["nurlon","nurlons"],["plique","pliques"],["snibe","snibes"],["brolle","brolles"],["fanu","fanus"]];
+const SYL = [
+  [m => [`Tous les ${m.A} sont des ${m.B}`, `Tous les ${m.B} sont des ${m.C}`], m => `Tous les ${m.A} sont des ${m.C}`, 0, m => `Tous les ${m.A} sont des ${m.B}, et tous les ${m.B} sont des ${m.C} : c'est donc vrai.`],
+  [m => [`Tous les ${m.A} sont des ${m.B}`, `Certains ${m.B} sont des ${m.C}`], m => `Certains ${m.A} sont des ${m.C}`, 2, m => `Les ${m.B} qui sont des ${m.C} ne sont peut-être pas des ${m.A}.`],
+  [m => [`Aucun ${m.a} n'est un ${m.b}`, `Tous les ${m.C} sont des ${m.A}`], m => `Aucun ${m.c} n'est un ${m.b}`, 0, m => `Les ${m.C} font partie des ${m.A}, et aucun ${m.a} n'est un ${m.b}.`],
+  [m => [`Tous les ${m.A} sont des ${m.B}`, `${m.X} est un ${m.a}`], m => `${m.X} est un ${m.b}`, 0, m => `Tout ${m.a} est un ${m.b}, donc ${m.X} aussi.`],
+  [m => [`Tous les ${m.A} sont des ${m.B}`, `${m.X} est un ${m.b}`], m => `${m.X} est un ${m.a}`, 2, m => `Il peut exister des ${m.B} qui ne sont pas des ${m.A}.`],
+  [m => [`Tous les ${m.A} sont des ${m.B}`, `${m.X} n'est pas un ${m.b}`], m => `${m.X} n'est pas un ${m.a}`, 0, m => `Si ${m.X} était un ${m.a}, ce serait forcément un ${m.b}.`],
+  [m => [`Aucun ${m.a} n'est un ${m.b}`, `${m.X} est un ${m.a}`], m => `${m.X} est un ${m.b}`, 1, m => `Aucun ${m.a} n'est un ${m.b}, donc ${m.X} n'en est pas un.`],
+  [m => [`Certains ${m.A} sont des ${m.B}`, `Tous les ${m.B} sont des ${m.C}`], m => `Certains ${m.A} sont des ${m.C}`, 0, m => `Les ${m.A} qui sont des ${m.B} sont forcément des ${m.C}.`],
+  [m => [`Tous les ${m.A} sont des ${m.B}`, `Aucun ${m.b} n'est un ${m.c}`], m => `Certains ${m.A} sont des ${m.C}`, 1, m => `Les ${m.A} sont tous des ${m.B}, et aucun ${m.b} n'est un ${m.c}.`],
+  [m => [`Certains ${m.A} sont des ${m.B}`, `Certains ${m.B} sont des ${m.C}`], m => `Certains ${m.A} sont des ${m.C}`, 2, m => `Les ${m.B} qui sont des ${m.A} et ceux qui sont des ${m.C} peuvent être différents.`],
+  [m => [`Aucun ${m.a} n'est un ${m.b}`, `Aucun ${m.b} n'est un ${m.c}`], m => `Aucun ${m.a} n'est un ${m.c}`, 2, m => `Ne rien avoir en commun avec les ${m.B} ne dit rien sur le lien entre ${m.A} et ${m.C}.`]
+];
+function qSyllo() {
+  const [p, q, r] = shuffle(TR_MOTS).slice(0, 3), m = {a:p[0], A:p[1], b:q[0], B:q[1], c:r[0], C:r[1], X:pick(["Ziko","Lou","Nil"])}, [F, C, A, why] = pick(SYL);
+  return {cat:"logi", kind:"Syllogisme", q:`${F(m).join(". ")}.<br>Donc : « ${C(m)} ».`, opts: VFI, a: A, why: why(m)};
+}
+
+const TR_GEN = {num:[qSeries, qSeries, qCalc], verb:[qVerbal], abs:[qSeqFig, qSeqFig, qGridFig], logi:[qLetters, qOrder, qDeduce, qSyllo]};
+function trMake(cat, n) {
+  const mix = ["num","verb","verb","num","abs","logi"], out = [], seen = new Set();
+  for (let i = 0; i < n; i++) {
+    let q, tries = 0; const c = cat || mix[i % mix.length];
+    do { q = pick(TR_GEN[c])(); tries++; } while ((seen.has(q.q) || q.a < 0 || q.opts.length < 3) && tries < 30);
+    seen.add(q.q); out.push(q);
+  }
+  return cat ? out : shuffle(out);
+}
+
+// --- Partie en cours ---
+let tq = null;
+const trLeft = () => tq && tq.lim ? Math.max(0, tq.lim - Math.floor((Date.now() - tq.t0) / 1000)) : 0;
+const mmss = s => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+function trStart(mode, cat) { const M = TR_MODES[mode]; tq = {mode, cat: mode === "theme" ? cat : "", qs: trMake(mode === "theme" ? cat : "", M.n), i: 0, ans: [], t0: Date.now(), lim: M.sec, done: false}; }
+function trFinish() {
+  if (!tq || tq.done) return; tq.done = true; tq.sec = Math.min(tq.lim || 1e9, Math.round((Date.now() - tq.t0) / 1000));
+  const by = {}; tq.qs.forEach((q, i) => { by[q.cat] = by[q.cat] || [0, 0]; by[q.cat][1]++; if (tq.ans[i] === q.a) by[q.cat][0]++; });
+  tq.ok = tq.qs.filter((q, i) => tq.ans[i] === q.a).length;
+  tq.by = by; S.train.hist.push({id:uid(), at:Date.now(), mode:tq.mode, cat:tq.cat, n:tq.qs.length, ok:tq.ok, sec:tq.sec, by});
+  if (S.train.hist.length > 300) S.train.hist = S.train.hist.slice(-300);
+  save("train");
+}
+function trNextOpen(from) { const n = tq.qs.length; for (let k = 1; k <= n; k++) { const j = (from + k) % n; if (tq.ans[j] === undefined) return j; } return -1; }
+ACT.trStart = el => { trStart(el.dataset.m, el.dataset.c || S.prefs.trCat); window.scrollTo(0, 0); };
+ACT.trCat = el => { S.prefs.trCat = el.dataset.k; save("prefs"); };
+ACT.trPick = el => {
+  if (!tq || tq.done || tq.ans[tq.i] !== undefined) return false;
+  tq.ans[tq.i] = +el.dataset.o;
+  if (tq.mode !== "theme") { const j = trNextOpen(tq.i); if (j < 0) trFinish(); else tq.i = j; }
+};
+ACT.trNext = () => { if (tq.i < tq.qs.length - 1) tq.i++; else trFinish(); };
+ACT.trSkip = () => { const j = trNextOpen(tq.i); if (j >= 0) tq.i = j; else toast("C'est la dernière question sans réponse"); };
+ACT.trEnd = () => { const left = tq.qs.length - tq.ans.filter(x => x !== undefined).length; if (left && !confirm(`Il reste ${left} question${left > 1 ? "s" : ""} sans réponse. Terminer quand même ?`)) return false; trFinish(); };
+ACT.trQuit = () => { if (!tq.done && !confirm("Abandonner ce test ? Il ne sera pas enregistré.")) return false; tq = null; };
+ACT.trHistDel = el => { S.train.hist = S.train.hist.filter(h => h.id !== el.dataset.id); save("train"); };
+setInterval(() => {
+  if (!tq || tq.done || !tq.lim) return;
+  const s = trLeft(), el = $("#tr-time"); if (el) { el.textContent = mmss(s); el.classList.toggle("low", s <= 60); }
+  if (s <= 0) { trFinish(); toast("Temps écoulé"); if (cur() === "entrainement") render(); }
+}, 1000);
+
+const catName = k => (TR_CATS.find(c => c[0] === k) || [0, k])[1];
+const catH = k => (TR_CATS.find(c => c[0] === k) || [0, 0, 285])[2];
+R.entrainement = () => {
+  const top = head("Entraînement", "Tests de logique", "Suites de nombres, mots, formes et raisonnement, chronométrés comme un vrai test d'aptitude.");
+  if (tq && !tq.done) return top + trQuestion();
+  if (tq && tq.done) return top + trResult();
+  return top + trHome();
+};
+function trQuestion() {
+  const q = tq.qs[tq.i], n = tq.qs.length, done = tq.ans.filter(x => x !== undefined).length, picked = tq.ans[tq.i], fb = tq.mode === "theme" && picked !== undefined;
+  return `<section class="card tr-q" style="--h:${catH(q.cat)}">
+    <div class="row"><span class="eyebrow">${TR_MODES[tq.mode].label}${tq.cat ? " · " + catName(tq.cat) : ""} · question ${tq.i + 1} sur ${n}</span><span class="spacer"></span>${tq.lim ? `<span class="tr-time ${trLeft() <= 60 ? "low" : ""}" id="tr-time" aria-live="off">${mmss(trLeft())}</span>` : ""}</div>
+    <div class="bar"><span style="width:${Math.round(done / n * 100)}%"></span></div>
+    <span class="chip" style="align-self:flex-start">${esc(q.kind)}</span>
+    <div class="tr-text">${q.q}</div>
+    <div class="opts ${q.fig ? "figs" : ""}">${q.opts.map((o, k) => `<button data-act="trPick" data-o="${k}" ${picked !== undefined ? "disabled" : ""} class="${fb ? (k === q.a ? "good" : k === picked ? "wrong" : "") : ""}">${q.fig ? "" : `<span class="tr-l">${"ABCDE"[k]}</span>`}${o}</button>`).join("")}</div>
+    ${fb ? `<div class="note"><b>${picked === q.a ? "Bonne réponse." : "Pas tout à fait."}</b> ${esc(q.why)}</div><div class="row"><span class="spacer"></span><button class="btn pri" data-act="trNext">${tq.i < n - 1 ? "Question suivante" : "Voir mon score"}</button></div>`
+      : tq.mode !== "theme" ? `<div class="row"><button class="btn" data-act="trSkip">Passer</button><span class="small muted">${done} réponse${done > 1 ? "s" : ""} sur ${n}</span><span class="spacer"></span><button class="btn ghost" data-act="trEnd">Terminer</button></div>` : ""}
+    <div class="row"><button class="x" data-act="trQuit">Abandonner</button></div></section>`;
+}
+function trResult() {
+  const n = tq.qs.length, pct = Math.round(tq.ok / n * 100), miss = tq.qs.map((q, i) => [q, i]).filter(([q, i]) => tq.ans[i] !== q.a);
+  const by = tq.by || {};
+  return `<div class="grid-2"><section class="card"><div class="flash" style="--h:${pct >= 70 ? 145 : pct >= 45 ? 60 : 20}"><p class="q">${tq.ok} / ${n}</p>
+    <p>${pct >= 80 ? "Excellent, très solide." : pct >= 60 ? "Bon résultat, continue comme ça." : pct >= 40 ? "Pas mal : refais-en un pour progresser." : "C'est en s'entraînant que ça vient : relis les corrections ci-dessous."}</p>
+    <p class="small muted">${TR_MODES[tq.mode].label}${tq.cat ? " · " + catName(tq.cat) : ""} · ${mmss(tq.sec)} ${tq.lim ? "sur " + mmss(tq.lim) : ""}</p></div>
+    <div class="stack">${Object.entries(by).map(([k, [ok, t]]) => `<div><div class="row small"><b>${catName(k)}</b><span class="spacer"></span>${ok} / ${t}</div><div class="bar" style="--h:${catH(k)}"><span style="width:${Math.round(ok / t * 100)}%"></span></div></div>`).join("")}</div>
+    <div class="row"><button class="btn pri" data-act="trStart" data-m="${tq.mode}" data-c="${tq.cat}">Recommencer</button><button class="btn" data-act="trQuit">Retour</button></div></section>
+  <section class="card"><h2>${ic("pen")}Corrections <span class="sub">${miss.length ? miss.length + " à revoir" : "aucune erreur"}</span></h2>
+    ${miss.length ? `<div class="list">${miss.map(([q, i]) => `<div class="item tr-rev" style="--h:${catH(q.cat)}"><div class="body stack" style="gap:6px"><span class="small muted">Question ${i + 1} · ${esc(q.kind)}${tq.ans[i] === undefined ? " · sans réponse" : ""}</span><div class="tr-text sm">${q.q}</div>
+      <div class="row small">${tq.ans[i] !== undefined ? `<span class="tr-ans wrong">Ta réponse : ${q.opts[tq.ans[i]]}</span>` : ""}<span class="tr-ans good">Bonne réponse : ${q.opts[q.a]}</span></div><p class="small">${esc(q.why)}</p></div></div>`).join("")}</div>` : `<p class="muted">Sans faute, bravo !</p>`}</section></div>`;
+}
+function trHome() {
+  const H = S.train.hist, full = H.filter(h => h.mode === "test"), best = full.reduce((m, h) => Math.max(m, h.ok), 0);
+  const tot = {}; H.forEach(h => Object.entries(h.by || {}).forEach(([k, [ok, t]]) => { tot[k] = tot[k] || [0, 0]; tot[k][0] += ok; tot[k][1] += t; }));
+  const tc = S.prefs.trCat;
+  return `<div class="grid-2"><section class="card"><h2>${ic("clock")}Tests chronométrés</h2>
+    <div class="tr-modes">
+      <button class="tr-mode" data-act="trStart" data-m="test"><b>Test complet</b><span>50 questions mélangées · 12 minutes</span><span class="small muted">Le format des tests d'aptitude en entretien : on ne voit les corrections qu'à la fin.</span></button>
+      <button class="tr-mode" data-act="trStart" data-m="rapide"><b>Test rapide</b><span>15 questions mélangées · 4 minutes</span><span class="small muted">Pour s'échauffer ou garder la main.</span></button>
+    </div>
+    <h3>S'entraîner par thème</h3><p class="muted small">10 questions sans chrono, avec l'explication après chaque réponse.</p>
+    <div class="tabs">${TR_CATS.map(([k, n]) => `<button data-act="trCat" data-k="${k}" aria-pressed="${tc === k}">${n}</button>`).join("")}</div>
+    <p class="small muted">${{num:"Suites de nombres, pourcentages, proportions, vitesses, intrus.", verb:"Analogies, synonymes, contraires, intrus.", abs:"Suites de figures et grilles à compléter.", logi:"Suites de lettres, classements, déductions et syllogismes."}[tc]}</p>
+    <div><button class="btn pri" data-act="trStart" data-m="theme" data-c="${tc}">Commencer : ${catName(tc)}</button></div></section>
+  <section class="card"><h2>${ic("star")}Mes résultats</h2>
+    ${H.length ? `<div class="stats"><div><span class="small muted">Tests faits</span><b class="big">${H.length}</b></div>${full.length ? `<div><span class="small muted">Meilleur test complet</span><b class="big">${best} / 50</b></div>` : ""}</div>
+      <h3>Réussite par thème</h3><div class="stack">${TR_CATS.filter(([k]) => tot[k]).map(([k, n, h]) => `<div><div class="row small"><b>${n}</b><span class="spacer"></span>${Math.round(tot[k][0] / tot[k][1] * 100)} % (${tot[k][0]} / ${tot[k][1]})</div><div class="bar" style="--h:${h}"><span style="width:${Math.round(tot[k][0] / tot[k][1] * 100)}%"></span></div></div>`).join("")}</div>
+      <h3>Derniers tests</h3><div class="list">${H.slice(-10).reverse().map(h => `<div class="item"><div class="body"><div class="row small"><b>${TR_MODES[h.mode].label}${h.cat ? " · " + catName(h.cat) : ""}</b><span class="spacer"></span><b>${h.ok} / ${h.n}</b></div><div class="bar"><span style="width:${Math.round(h.ok / h.n * 100)}%"></span></div><div class="meta">${fmtStamp(h.at)} · ${mmss(h.sec)}</div></div><button class="x" data-act="trHistDel" data-id="${h.id}" aria-label="Supprimer">×</button></div>`).join("")}</div>`
+      : `<p class="muted">Tes scores apparaîtront ici après ton premier test.</p>`}
+    <details class="note"><summary>Conseils pour un test chronométré</summary>
+      <p style="margin-top:8px">Dans un test de 50 questions en 12 minutes, presque personne ne finit : vise la précision sur un maximum de questions plutôt que tout terminer. Cela fait environ 15 secondes par question.</p>
+      <p>Si une question bloque, passe-la et reviens-y à la fin. En général seules les bonnes réponses comptent : avant la fin du temps, réponds aux questions restantes plutôt que de les laisser vides.</p>
+      <p>Pas de calculatrice : entraîne-toi au calcul mental (pourcentages, fractions, proportions).</p>
+      <p class="small muted">Ces questions sont originales et générées à chaque partie. Elles reprennent les types d'exercices de ces tests, mais ton score ici n'est pas comparable à un score officiel.</p></details></section></div>`;
+}
 // ---------- Jeux ----------
 const GAMES = [["sudoku","Sudoku"],["mots","Mots croisés"],["code","Code secret"],["geo","Géographie"]];
 R.jeux = () => {
