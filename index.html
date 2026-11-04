@@ -152,6 +152,12 @@ a.t:hover{text-decoration:underline}
 .due-t{display:flex;gap:5px;align-items:flex-start;font-size:12.5px;text-decoration:none;color:var(--muted);padding:3px 4px;border-radius:6px;overflow-wrap:anywhere}
 .due-t .ic{color:var(--a);margin-top:2px}
 .due-t:hover{background:var(--surface-2);color:var(--ink)}
+.todo-t{color:var(--ink);background:var(--t);border-left:3px solid var(--a);align-items:center}
+.todo-t a{color:inherit;text-decoration:none;flex:1}
+.todo-t.late{border-left-color:var(--danger)}
+.todo-t .lt{color:var(--danger);font-weight:700;font-size:11px}
+.tick{flex:none;width:15px;height:15px;border-radius:5px;border:1.6px solid var(--a);background:var(--surface);cursor:pointer;padding:0}
+.tick:hover{background:var(--a)}
 .months{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(232px,1fr);gap:12px;overflow-x:auto;padding-bottom:6px;scroll-snap-type:x proximity}
 .month{border:1px solid var(--line);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:8px;scroll-snap-align:start;background:var(--bg);min-width:0}
 .month h3{font-size:15px;text-transform:capitalize}
@@ -702,7 +708,7 @@ const dirty = new Set(lsGet("dirty") || []);
 const _dAdd = dirty.add.bind(dirty), _dDel = dirty.delete.bind(dirty);
 dirty.add = k => { _dAdd(k); lsSet("dirty", [...dirty]); return dirty; };
 dirty.delete = k => { const r = _dDel(k); lsSet("dirty", [...dirty]); return r; };
-const PAGE_VERSION = "6";
+const PAGE_VERSION = "7";
 function save(k) {
   lsSet(k, S[k]); lsSet("savedAt", Date.now()); if (typeof fileChanged === "function") fileChanged();
   dirty.add(k); if (!COL) return;
@@ -891,7 +897,8 @@ R.aujourdhui = () => {
     <section class="card" style="--h:200"><h2>${ic("check")}À faire bientôt <a class="sub" href="#todo">Tout voir</a></h2>
       ${tasks.length ? `<div class="list">${tasks.slice(0, 6).map(taskRow).join("")}</div>` : `<p class="empty">Rien d'urgent dans les trois prochains jours. Profites-en !</p>`}</section>
     <section class="card" style="--h:250"><h2>${ic("calendar")}Agenda du jour <a class="sub" href="#agenda">Semaine</a></h2>
-      ${evs.length ? `<div class="stack">${evs.map(e => evChip(e)).join("")}</div>` : `<p class="empty">Aucun rendez-vous noté pour aujourd'hui.</p>`}</section>
+      ${evs.length ? `<div class="stack">${evs.map(e => evChip(e)).join("")}</div>` : `<p class="empty">Aucun rendez-vous noté pour aujourd'hui.</p>`}
+      ${dueOn(T).length ? `<div class="stack" style="gap:2px">${dueOn(T).map(agDueChip).join("")}</div>` : ""}</section>
     <section class="card" style="--h:20"><h2>${ic("cross")}Parole du jour <a class="sub" href="#evangile">Évangile</a></h2>
       <p class="verse" style="font-size:21px">« ${esc(v[0])} »</p><p class="ref">${esc(v[1])}</p>
       <a class="linkbtn" href="https://www.aelf.org/${T}/romain/messe" target="_blank" rel="noopener"><div><b>Lire l'évangile du jour</b><small>Lectures de la messe sur AELF</small></div><span class="arr">→</span></a></section>
@@ -999,7 +1006,8 @@ IN.taskDone = el => { const t = S.todo.tasks.find(x => x.id === el.dataset.id); 
 let weekOff = 0;
 function dueOn(d) {
   const out = [];
-  S.todo.tasks.forEach(t => { if (t.due === d && !t.done) out.push({title:t.title, h:(tagOf(t.tag) || {h:200}).h, page:"todo"}); });
+  const T = today();
+  S.todo.tasks.forEach(t => { if (!t.done && t.due && (t.due === d || (d === T && t.due < T))) out.push({title:t.title, h:(tagOf(t.tag) || {h:200}).h, page:"todo", id:t.id, late:t.due < d, prio:t.prio}); });
   S.suf.tasks.forEach(t => { if (t.due === d && !t.done) out.push({title:"Camp · " + t.title, h:135, page:"suf"}); });
   S.cours.subjects.forEach(s => s.deadlines.forEach(x => { if (x.date === d && !x.done) out.push({title:s.name + " · " + x.title, h:s.h, page:"cours"}); }));
   return out;
@@ -1017,7 +1025,7 @@ const gOpenUrl = (a, d) => { if (a.url) return a.url; const x = pISO(d); return 
 function evChip(e, actions) {
   const a = accOf(e.acc);
   return `<div class="ev" style="--h:${a.h}"><span class="tm">${e.start ? e.start + (e.end ? "–" + e.end : "") : "Toute la journée"} · ${esc(a.name)}</span><b>${esc(e.title)}</b>${e.notes ? `<span class="small muted">${esc(e.notes)}</span>` : ""}${e.ex ? `<span class="small muted">exemple</span>` : ""}
-    ${actions ? `<span class="acts"><a href="${esc(gAddUrl(e))}" target="_blank" rel="noopener">Copier dans Google</a><button data-act="evDel" data-id="${e.id}">Supprimer</button></span>` : ""}</div>`;
+    ${actions && e.imp ? `<span class="small muted">Depuis Google</span>` : actions ? `<span class="acts"><a href="${esc(gAddUrl(e))}" target="_blank" rel="noopener">Copier dans Google</a><button data-act="evDel" data-id="${e.id}">Supprimer</button></span>` : ""}</div>`;
 }
 R.agenda = () => {
   const T = today(), M = addD(monday(T), weekOff * 7), days = [...Array(7)].map((_, i) => addD(M, i));
@@ -1028,8 +1036,9 @@ R.agenda = () => {
   gcalCard() +
   `<div class="week">${days.map(d => { const x = pISO(d); const evs = S.agenda.events.filter(e => e.date === d).sort((a, b) => (a.start || "").localeCompare(b.start || ""));
      const dt = dueOn(d);
-     return `<div class="day ${d === T ? "today" : ""}"><div class="day-h"><span>${JC[x.getDay()]}</span><b>${x.getDate()}</b><span class="small muted" style="text-transform:none;letter-spacing:0;font-weight:500">${esc(fete(d))}</span></div>${evs.map(e => evChip(e, true)).join("")}${dt.map(t => `<a class="due-t" style="--h:${t.h}" href="#${t.page}">${ic("check", 13)}<span>${esc(t.title)}</span></a>`).join("")}</div>`; }).join("")}</div>
-  <p class="muted small row" style="gap:4px">Les rendez-vous sont en couleur. Les tâches à rendre ce jour-là (to-do, camp, cours) apparaissent dessous avec ${ic("check", 13)}.</p>
+     return `<div class="day ${d === T ? "today" : ""}"><div class="day-h"><span>${JC[x.getDay()]}</span><b>${x.getDate()}</b><span class="small muted" style="text-transform:none;letter-spacing:0;font-weight:500">${esc(fete(d))}</span></div>${evs.map(e => evChip(e, true)).join("")}${dt.map(agDueChip).join("")}</div>`; }).join("")}</div>
+  ${undatedBlock()}
+  <p class="muted small row" style="gap:4px">Les rendez-vous sont en couleur. Les tâches de ta to-do (et celles du camp et des cours) apparaissent le jour de leur échéance : coche-les pour les marquer faites. Les tâches en retard s'affichent aujourd'hui.</p>
   <div class="grid-2">
   <section class="card"><h2>${ic("calendar")}Ajouter un rendez-vous</h2>
     <form class="stack" data-form="evAdd">
@@ -1045,8 +1054,15 @@ R.agenda = () => {
     <div class="list">${S.agenda.accounts.map(a => `<div class="item" style="--h:${a.h}"><span class="dot" style="margin-top:12px"></span><div class="body stack" style="gap:6px">
       <div class="row"><input type="text" id="acc-n-${a.id}" value="${esc(a.name)}" data-in="accName" data-id="${a.id}" aria-label="Nom" style="flex:1 1 110px;font-weight:600"><input type="email" id="acc-e-${a.id}" value="${esc(a.email)}" placeholder="adresse@gmail.com" data-in="accEmail" data-id="${a.id}" aria-label="Adresse Gmail" style="flex:2 1 180px"></div>
       <input type="url" id="acc-u-${a.id}" value="${esc(a.url || "")}" placeholder="Lien du calendrier (facultatif)" data-in="accUrl" data-id="${a.id}" aria-label="Lien du calendrier">
+      <input type="url" id="acc-i-${a.id}" value="${esc(a.ical || "")}" placeholder="Adresse secrète au format iCal (synchro automatique)" data-in="accIcal" data-id="${a.id}" aria-label="Adresse secrète iCal">
+      ${a.ical ? `<span class="small ${(ICAL_ST[a.id] || {}).err ? "" : "muted"}" style="${(ICAL_ST[a.id] || {}).err ? "color:var(--danger)" : ""}">${icalLabel(a)}</span>` : ""}
       <div class="row"><a class="btn sm" href="${esc(gOpenUrl(a, M))}" target="_blank" rel="noopener">${ic("arrow", 14)}Ouvrir l'agenda</a><label class="btn sm" style="cursor:pointer">${ic("upload", 14)}Importer un .ics<input type="file" hidden accept=".ics,text/calendar" data-ics="${a.id}"></label>${S.agenda.events.some(e => e.imp === a.id) ? `<span class="small muted">${S.agenda.events.filter(e => e.imp === a.id).length} événements importés</span>` : ""}<button class="x" data-act="accDel" data-id="${a.id}">Retirer</button></div></div></div>`).join("")}</div>
     <form class="add" data-form="accAdd"><input type="text" id="acc-new" name="n" placeholder="Nouvel agenda (ex. Boulot)" required><button class="btn">Ajouter</button></form>
+    ${S.agenda.accounts.some(a => a.ical) && window.SITE_CONFIG ? `<div><button class="btn sm" data-act="icalNow">${ic("upload", 14)}Mettre à jour depuis Google</button></div>` : ""}
+    <details class="note"><summary>Faire venir mes événements Google automatiquement</summary>
+      <p style="margin-top:8px">Dans Google Agenda sur ordinateur : roue dentée › <b>Paramètres</b> › clique sur ton agenda à gauche › tout en bas, <b>« Adresse secrète au format iCal »</b> › copie-la et colle-la dans le champ « Adresse secrète au format iCal » du bon compte ci-dessus.</p>
+      <p>Le site récupère alors tes événements à chaque ouverture, puis toutes les 30 minutes. Ils apparaissent dans ta semaine et sur Aujourd'hui. Les modifications se font toujours dans Google : ici, ils sont en lecture seule et se remettent à jour tout seuls.</p>
+      <p>Cette adresse est secrète : ne la partage pas. Elle reste enregistrée dans ton compte, comme le reste de ton carnet.</p></details>
     <details class="note"><summary>Ajouter un calendrier à partir de son lien</summary>
       <p style="margin-top:8px">Colle le lien dans le champ « Lien du calendrier » : le bouton « Ouvrir l'agenda » t'y emmène. Pour voir ses événements <b>dans</b> cette page, il faut un fichier .ics : ouvre l'adresse iCal du calendrier (Google Agenda › Paramètres › ton agenda › Adresse secrète au format iCal) ou exporte-le, puis dépose le fichier avec « Importer un .ics ». Réimporte-le quand tu veux le mettre à jour : les anciens événements importés sont remplacés.</p></details>
     <details class="note"><summary>Pourquoi mes événements Google ne s'affichent pas tout seuls ?</summary>
@@ -1110,6 +1126,21 @@ ACT.gcDel = el => { S.agenda.gcal = S.agenda.gcal.filter(g => g.id !== el.datase
 ACT.gSel = el => { S.prefs.gSel = el.dataset.k; save("prefs"); };
 ACT.gMode = el => { S.prefs.gMode = el.dataset.k; save("prefs"); };
 IN.gcName = el => { const g = S.agenda.gcal.find(x => x.id === el.dataset.id); if (g) { g.name = el.value; save("agenda"); } return false; };
+// Tâches de la to-do dans l'agenda
+function agDueChip(t) {
+  if (t.page !== "todo") return `<a class="due-t" style="--h:${t.h}" href="#${t.page}">${ic("check", 13)}<span>${esc(t.title)}</span></a>`;
+  return `<div class="due-t todo-t ${t.late ? "late" : ""}" style="--h:${t.h}"><button class="tick" data-act="agDone" data-id="${t.id}" aria-label="Marquer « ${esc(t.title)} » comme faite" title="Marquer comme faite"></button><a href="#todo">${esc(t.title)}${t.late ? ` <span class="lt">en retard</span>` : ""}</a></div>`;
+}
+ACT.agDone = el => { const t = S.todo.tasks.find(x => x.id === el.dataset.id); if (!t) return; t.done = true; t.status = "done"; save("todo"); toast("Tâche faite : " + t.title); };
+function undatedBlock() {
+  const u = S.todo.tasks.filter(t => !t.done && !t.due); if (!u.length) return "";
+  return `<section class="card"><h2>${ic("check")}Tâches à caser dans la semaine <span class="sub">${u.length} sans date</span></h2>
+    <p class="muted small">Choisis un jour : la tâche apparaîtra dans l'agenda ce jour-là.</p>
+    <div class="list">${u.slice(0, 12).map(t => `<div class="item" style="--h:${(tagOf(t.tag) || {h:200}).h};align-items:center"><span class="dot"></span><div class="body"><div class="t">${esc(t.title)}</div></div><input type="date" id="ud-${t.id}" data-in="agDue" data-id="${t.id}" aria-label="Date pour ${esc(t.title)}"></div>`).join("")}</div>
+    ${u.length > 12 ? `<p class="small muted">Et ${u.length - 12} autres dans la <a href="#todo">to-do</a>.</p>` : ""}</section>`;
+}
+IN.agDue = el => { const t = S.todo.tasks.find(x => x.id === el.dataset.id); if (!t || !el.value || +el.value.slice(0, 4) < new Date().getFullYear() - 1) return false;
+  t.due = el.value; save("todo"); toast("Ajoutée à l'agenda le " + fmtLong(el.value)); setTimeout(render, 0); return false; };
 ACT.wk = el => { const n = +el.dataset.n; weekOff = n === 0 ? 0 : weekOff + n; };
 ACT.evDel = el => { S.agenda.events = S.agenda.events.filter(e => e.id !== el.dataset.id); save("agenda"); };
 ACT.accDel = el => { if (S.agenda.accounts.length <= 1) return toast("Garde au moins un agenda"); S.agenda.accounts = S.agenda.accounts.filter(a => a.id !== el.dataset.id); save("agenda"); };
@@ -1121,17 +1152,30 @@ FORM.evAdd = (f, d) => {
 };
 FORM.accAdd = (f, d) => { const hs = [250,135,305,45,20,200,90]; S.agenda.accounts.push({id:uid(),name:d.get("n"),email:"",h:hs[S.agenda.accounts.length % hs.length]}); save("agenda"); };
 IN.accName = el => { accOf(el.dataset.id).name = el.value; save("agenda"); return false; };
+const ICAL_ST = {};
+function icalLabel(a) {
+  if (!window.SITE_CONFIG) return "La synchro automatique fonctionne sur ton site.";
+  const st = ICAL_ST[a.id]; if (!st) return "Synchro automatique : en attente…";
+  if (st.wait) return "Synchro en cours…";
+  if (st.err) return "Synchro impossible : " + st.err;
+  return `Synchronisé à ${hm(new Date(st.at))} · ${st.n} événement${st.n > 1 ? "s" : ""}`;
+}
+IN.accIcal = el => { const a = accOf(el.dataset.id); const v = el.value.trim(); if (v && !/^https:\/\/calendar\.google\.com\/calendar\/ical\//.test(v)) { toast("Colle l'adresse secrète au format iCal (elle commence par https://calendar.google.com/calendar/ical/)"); return false; }
+  a.ical = v; if (!v) { S.agenda.events = S.agenda.events.filter(e => e.imp !== a.id); delete ICAL_ST[a.id]; } save("agenda"); if (v && typeof icalSync === "function") icalSync(a.id); return false; };
+ACT.icalNow = () => { if (typeof icalSync === "function") icalSync(); return false; };
 IN.accUrl = el => { accOf(el.dataset.id).url = el.value.trim(); save("agenda"); return false; };
 IN.accEmail = el => { accOf(el.dataset.id).email = el.value.trim(); save("agenda"); return false; };
 // re-render agenda after leaving an account field so links update
-document.addEventListener("focusout", e => { if (e.target.matches && e.target.matches('[data-in="accEmail"],[data-in="accName"],[data-in="accUrl"]')) setTimeout(() => { if (!document.activeElement || !document.activeElement.matches('[data-in^="acc"]')) render(); }, 50); });
+document.addEventListener("focusout", e => { if (e.target.matches && e.target.matches('[data-in="accEmail"],[data-in="accName"],[data-in="accUrl"],[data-in="accIcal"]')) setTimeout(() => { if (!document.activeElement || !document.activeElement.matches('[data-in^="acc"]')) render(); }, 50); });
 // Import .ics
 function parseICS(txt) {
   const lines = txt.replace(/\r?\n[ \t]/g, "").split(/\r?\n/), evs = []; let c = null;
   for (const l of lines) {
     if (l === "BEGIN:VEVENT") { c = {}; continue; } if (l === "END:VEVENT") { if (c) evs.push(c); c = null; continue; }
     if (!c) continue; const i = l.indexOf(":"); if (i < 0) continue;
-    const k = l.slice(0, i), name = k.split(";")[0]; if (!c[name]) c[name] = {k, v:l.slice(i + 1)};
+    const k = l.slice(0, i), name = k.split(";")[0];
+    if (name === "EXDATE") { (c.EX = c.EX || []).push(...l.slice(i + 1).split(",").map(v => ({k, v}))); continue; }
+    if (!c[name]) c[name] = {k, v:l.slice(i + 1)};
   }
   return evs;
 }
@@ -1143,23 +1187,37 @@ function icsDate(o) {
   return {d: m[7] ? new Date(Date.UTC(+m[1], m[2] - 1, +m[3], +m[4], +m[5])) : new Date(+m[1], m[2] - 1, +m[3], +m[4], +m[5]), allDay:false};
 }
 const hm = d => pad(d.getHours()) + ":" + pad(d.getMinutes());
+const strHash = t => { let h = 5381; for (let i = 0; i < t.length; i++) h = (h * 33 ^ t.charCodeAt(i)) >>> 0; return h.toString(36); };
+const BYD = {SU:0, MO:1, TU:2, WE:3, TH:4, FR:5, SA:6};
 function importICS(txt, acc) {
-  const from = addD(today(), -60), to = addD(today(), 365), out = [];
-  for (const e of parseICS(txt)) {
+  const from = addD(today(), -60), to = addD(today(), 365), out = [], all = parseICS(txt);
+  // Occurrences modifiées ou annulées d'un événement répétitif : on retire l'occurrence d'origine
+  const moved = new Set(all.filter(e => e["RECURRENCE-ID"] && e.UID).map(e => { const r = icsDate(e["RECURRENCE-ID"]); return r ? e.UID.v + "|" + iso(r.d) : ""; }));
+  for (const e of all) {
+    if (e.STATUS && /CANCELLED/i.test(e.STATUS.v)) continue;
     const s = icsDate(e.DTSTART); if (!s) continue; const en = icsDate(e.DTEND);
-    const dur = en ? en.d - s.d : 0, title = icsText(e.SUMMARY && e.SUMMARY.v) || "(sans titre)", notes = icsText(e.LOCATION && e.LOCATION.v);
-    const push = d => { const ds = iso(d); if (ds < from || ds > to) return; const end = new Date(d.getTime() + dur);
-      out.push({id:uid(), title, date:ds, start:s.allDay ? "" : hm(d), end:s.allDay || !en ? "" : hm(end), acc, notes, imp:acc}); };
+    const dur = en ? en.d - s.d : 0, title = icsText(e.SUMMARY && e.SUMMARY.v) || "(sans titre)", notes = icsText(e.LOCATION && e.LOCATION.v), u = e.UID ? e.UID.v : title;
+    const ex = new Set((e.EX || []).map(x => { const r = icsDate(x); return r ? iso(r.d) : ""; }));
+    const push = d => { const ds = iso(d); if (ds < from || ds > to || ex.has(ds) || (e.RRULE && moved.has(u + "|" + ds))) return; const end = new Date(d.getTime() + dur);
+      const ev = {title, date:ds, start:s.allDay ? "" : hm(d), end:s.allDay || !en ? "" : hm(end), acc, notes, imp:acc};
+      out.push({id:"i" + strHash(acc + u + ds + ev.start), ...ev}); };
     const rr = e.RRULE && Object.fromEntries(e.RRULE.v.split(";").map(p => p.split("=")));
     if (!rr) { push(s.d); continue; }
-    const step = {DAILY:1, WEEKLY:7}[rr.FREQ], iv = +(rr.INTERVAL || 1), until = rr.UNTIL ? iso(icsDate({k:"", v:rr.UNTIL.length === 8 ? rr.UNTIL : rr.UNTIL}).d) : to;
-    let n = 0, d = new Date(s.d), max = +(rr.COUNT || 400);
-    while (n < max && n < 400 && iso(d) <= until && iso(d) <= to) {
+    const iv = +(rr.INTERVAL || 1), until = rr.UNTIL ? iso(icsDate({k:"", v:rr.UNTIL}).d) : to, max = Math.min(+(rr.COUNT || 1000), 1000);
+    const days = rr.FREQ === "WEEKLY" && rr.BYDAY ? rr.BYDAY.split(",").map(x => BYD[x.slice(-2)]).filter(x => x !== undefined) : null;
+    let n = 0, d = new Date(s.d), guard = 0;
+    while (n < max && guard++ < 3000 && iso(d) <= until && iso(d) <= to) {
+      if (days) {
+        const wk = new Date(d); wk.setDate(wk.getDate() - ((wk.getDay() + 6) % 7)); // lundi de la semaine
+        for (const dd of days.map(x => (x + 6) % 7).sort((a, b) => a - b)) { const o = new Date(wk); o.setDate(o.getDate() + dd); if (o < s.d || iso(o) > until || n >= max) continue; push(o); n++; }
+        d = wk; d.setDate(d.getDate() + 7 * iv); continue;
+      }
       push(d); n++;
-      if (step) d.setDate(d.getDate() + step * iv); else if (rr.FREQ === "MONTHLY") d.setMonth(d.getMonth() + iv); else if (rr.FREQ === "YEARLY") d.setFullYear(d.getFullYear() + iv); else break;
+      if (rr.FREQ === "DAILY") d.setDate(d.getDate() + iv); else if (rr.FREQ === "WEEKLY") d.setDate(d.getDate() + 7 * iv); else if (rr.FREQ === "MONTHLY") d.setMonth(d.getMonth() + iv); else if (rr.FREQ === "YEARLY") d.setFullYear(d.getFullYear() + iv); else break;
     }
   }
-  S.agenda.events = S.agenda.events.filter(e => e.imp !== acc).concat(out); save("agenda");
+  const sig = a => JSON.stringify(a.map(({id, ...r}) => [id, r]).sort((x, y) => x[0] < y[0] ? -1 : 1));
+  if (sig(S.agenda.events.filter(e => e.imp === acc)) !== sig(out)) { S.agenda.events = S.agenda.events.filter(e => e.imp !== acc).concat(out); save("agenda"); }
   return out.length;
 }
 document.addEventListener("change", e => {
@@ -1702,6 +1760,7 @@ async function siteConnect() {
     toPush.forEach(k => flush(k));
     if (!siteConnect.listening) { siteConnect.listening = true; KEYS.forEach(listen); }
     lastSync = Date.now(); setSync("ok"); applyTheme(); softRender();
+    icalSync();
   } catch (e) {
     syncErr = (e && e.code) || "connexion"; syncErrRaw = (e && e.raw) || ""; setSync("err");
     // Nouvel essai dans 30 s ; l'aide pour réparer s'affiche dans Réglages
@@ -1712,6 +1771,34 @@ async function siteConnect() {
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && COL && SB_USER) COL.getAll().then(rows => { let ch = false; rows.forEach(r => { if (KEYS.includes(r.key) && !timers[r.key] && !writing[r.key] && !dirty.has(r.key) && r.at !== echo[r.key] && JSON.stringify(r.v) !== JSON.stringify(S[r.key])) { S[r.key] = r.v; lsSet(r.key, r.v); ch = true; } }); if (ch) { migrate(); softRender(); } }).catch(() => {}); });
 if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(() => {});
 ACT.syncNow = () => { if (!COL) { if (SB_USER) { siteConnect(); toast("Nouvel essai de connexion…"); } else loginView(); return false; } KEYS.forEach(k => flush(k)); toast("Synchronisation lancée"); return false; };
+
+// Synchro des agendas Google (adresse secrète iCal) via la fonction Supabase « ical »
+let icalLast = 0;
+async function icalSync(only) {
+  if (!SB_USER || !S.agenda) return;
+  const accs = S.agenda.accounts.filter(a => a.ical && (!only || a.id === only)); if (!accs.length) return;
+  if (!only) icalLast = Date.now();
+  let ch = false;
+  await Promise.all(accs.map(async a => {
+    ICAL_ST[a.id] = Object.assign({}, ICAL_ST[a.id], {wait: true}); if (cur() === "agenda") softRender();
+    try {
+      const { data, error } = await sbClient().functions.invoke("ical", { body: { url: a.ical } });
+      if (error) {
+        let msg = error.message || "erreur";
+        try { const t = error.context && await error.context.text(); if (t) msg = t; } catch {}
+        if (/not found|404/i.test(msg)) msg = "la fonction « ical » n'est pas encore installée dans Supabase (voir LISEZMOI).";
+        throw new Error(msg);
+      }
+      const txt = String(data || ""); if (!/BEGIN:VCALENDAR/.test(txt)) throw new Error("Google n'a pas renvoyé d'agenda. Vérifie l'adresse iCal.");
+      const before = JSON.stringify(S.agenda.events), n = importICS(txt, a.id);
+      if (before !== JSON.stringify(S.agenda.events)) ch = true;
+      ICAL_ST[a.id] = {at: Date.now(), n};
+    } catch (e) { ICAL_ST[a.id] = {err: String((e && e.message) || e).slice(0, 200)}; }
+  }));
+  if (only || ch || ["agenda", "aujourdhui"].includes(cur())) softRender();
+}
+setInterval(() => { if (SB_USER && Date.now() - icalLast > 30 * 60000) icalSync(); }, 60000);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && SB_USER && Date.now() - icalLast > 10 * 60000) icalSync(); });
 // ---------- Entraînement : tests de logique (suites, verbal, formes, raisonnement) ----------
 // Questions originales, générées à chaque partie, dans l'esprit des tests d'aptitude chronométrés (type Predictive Index).
 const rnd = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
