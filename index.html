@@ -187,6 +187,12 @@ ol.loi li::marker{font-family:var(--f-display);font-weight:800;color:var(--a)}
 .kcard .t{font-weight:600}
 .kcard .meta{display:flex;gap:6px;flex-wrap:wrap;font-size:12.5px}
 .kact{display:flex;align-items:center;gap:4px}
+.item.editing{display:block}
+.tedit{display:flex;flex-direction:column;gap:10px;width:100%;padding:4px 0}
+.tedit-row{display:flex;gap:8px;flex-wrap:wrap}.tedit-row .f{flex:1 1 120px;min-width:0}
+.tedit input,.tedit select,.tedit textarea{width:100%;box-sizing:border-box}
+.kcard.editing{cursor:default}
+.item .t[data-act],.kcard .t[data-act]{cursor:pointer}
 .kempty{color:var(--muted);font-size:13px;text-align:center;padding:16px 0}
 .carnet{display:grid;grid-template-columns:240px minmax(0,1fr);gap:16px;align-items:start}
 @media (max-width:760px){.carnet{grid-template-columns:1fr}}
@@ -661,11 +667,17 @@ function migrate() {
 }
 migrate();
 
-let COL = null, ASSETS = null, syncErr = "", lastSync = 0; const timers = {}, writing = {}, again = {}, dirty = new Set(), echo = {};
-const PAGE_VERSION = "4";
+let COL = null, ASSETS = null, syncErr = "", syncErrRaw = "", lastSync = 0; const timers = {}, writing = {}, again = {}, echo = {};
+// Les sections modifiées mais pas encore envoyées sont mémorisées dans le navigateur :
+// si la page se ferme ou si l'envoi échoue, elles repartent à la prochaine ouverture au lieu d'être écrasées.
+const dirty = new Set(lsGet("dirty") || []);
+const _dAdd = dirty.add.bind(dirty), _dDel = dirty.delete.bind(dirty);
+dirty.add = k => { _dAdd(k); lsSet("dirty", [...dirty]); return dirty; };
+dirty.delete = k => { const r = _dDel(k); lsSet("dirty", [...dirty]); return r; };
+const PAGE_VERSION = "5";
 function save(k) {
   lsSet(k, S[k]); lsSet("savedAt", Date.now()); if (typeof fileChanged === "function") fileChanged();
-  if (!COL) { dirty.add(k); return; }
+  dirty.add(k); if (!COL) return;
   clearTimeout(timers[k]); timers[k] = setTimeout(() => { timers[k] = null; flush(k); }, 600);
 }
 async function flush(k, retry) {
@@ -673,17 +685,19 @@ async function flush(k, retry) {
   if (writing[k]) { again[k] = true; return; }
   writing[k] = true;
   const at = Date.now(); echo[k] = at;
-  try { await COL.doc(k).set(JSON.parse(JSON.stringify({ v: S[k], at }))); dirty.delete(k); syncErr = ""; lastSync = Date.now(); setSync("ok"); }
+  const snap = JSON.stringify(S[k]);
+  try { await COL.doc(k).set(JSON.parse(JSON.stringify({ v: S[k], at }))); if (JSON.stringify(S[k]) === snap && !timers[k]) dirty.delete(k); syncErr = ""; syncErrRaw = ""; lastSync = Date.now(); setSync("ok"); }
   catch (e) {
     const c = (e && e.code) || "inconnue"; dirty.add(k);
-    if (!retry && (c === "unavailable" || c === "resource_exhausted")) { writing[k] = false; setTimeout(() => flush(k, true), 1500 + Math.random() * 1000); return; }
-    syncErr = c; setSync("err");
+    if (!retry && (c === "unavailable" || c === "resource_exhausted" || (e && e.retry))) { writing[k] = false; setTimeout(() => flush(k, true), 1500 + Math.random() * 1000); return; }
+    syncErr = c; syncErrRaw = (e && e.raw) || ""; setSync("err");
   }
   writing[k] = false;
   if (again[k]) { again[k] = false; flush(k); }
 }
 function setSync(s) {
   const el = $("#sync"); el.dataset.s = s;
+  el.title = s === "err" ? "Ouvre Réglages pour voir comment réparer" : "";
   el.textContent = s === "ok" ? "Synchronisé" + (lastSync ? " à " + hm(new Date(lastSync)) : " sur ton compte") : s === "err" ? "Synchro en échec (" + syncErr + "), copie locale gardée" : s === "wait" ? "Connexion à ton compte…" : "Enregistré sur cet appareil seulement";
 }
 // Re-rendu différé si la personne est en train d'écrire
@@ -698,7 +712,7 @@ function listen(k) {
   COL.doc(k).onSnapshot(sn => {
     if (!sn.exists || sn.metadata.hasPendingWrites) return;
     const d = sn.data(); if (!d || !d.v || d.at === echo[k]) return;
-    if (timers[k] || writing[k]) return; // une modification locale va partir
+    if (timers[k] || writing[k] || dirty.has(k)) return; // une modification locale va partir
     if (JSON.stringify(d.v) === JSON.stringify(S[k])) return;
     S[k] = d.v; migrate(); lsSet(k, S[k]); if (k === "prefs") applyTheme(); softRender();
   }, e => { syncErr = (e && e.code) || "connexion"; setSync("err"); });
@@ -732,6 +746,8 @@ async function connect() {
   } catch (e) { clearTimeout(timeout); syncErr = (e && e.code) || "connexion"; setSync("err"); }
 }
 window.addEventListener("online", () => { if (COL) [...dirty].forEach(k => flush(k)); });
+// Nouvel essai automatique toutes les 30 s tant qu'il reste des changements non envoyés
+setInterval(() => { if (COL && navigator.onLine !== false) [...dirty].forEach(k => { if (!timers[k] && !writing[k]) flush(k, true); }); }, 30000);
 ACT.syncNow = () => { if (!COL) { toast("Pas encore connectée à ton compte"); return false; } KEYS.forEach(k => flush(k)); toast("Synchronisation lancée"); return false; };
 
 // ---------- Navigation ----------
@@ -871,12 +887,36 @@ R.aujourdhui = () => {
 FORM.quickIdea = (f, d) => { S.idees.notes.unshift({id:uid(),title:"",text:d.get("t"),h:90,pinned:false,at:Date.now()}); save("idees"); toast("Idée gardée dans « Idées »"); };
 
 // To-do
+let editT = null;
+function taskEditForm(t) {
+  return `<form class="tedit" data-form="taskEdit" data-id="${t.id}" style="--h:${(tagOf(t.tag) || {h:200}).h}">
+    <label class="f">Tâche<input type="text" id="te-title-${t.id}" name="title" value="${esc(t.title)}" required></label>
+    <div class="tedit-row">
+      <label class="f">Échéance<input type="date" name="due" value="${esc(t.due || "")}"></label>
+      <label class="f">Étiquette<select name="tag">${S.todo.tags.map(g => `<option value="${g.id}" ${t.tag === g.id ? "selected" : ""}>${esc(g.name)}</option>`).join("")}</select></label>
+      <label class="f">Priorité<select name="prio">${[[1,"Basse"],[2,"Moyenne"],[3,"Haute"]].map(([v, l]) => `<option value="${v}" ${+t.prio === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+      <label class="f">Statut<select name="status">${KCOLS.map(([k, l]) => `<option value="${k}" ${(t.status || "todo") === k ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+    </div>
+    <label class="f">Détails<textarea name="detail" rows="3" placeholder="Détails, contacts, liens, étapes…">${esc(t.detail || "")}</textarea></label>
+    <div class="row"><button class="btn pri">Enregistrer</button><button class="btn" type="button" data-act="taskEditCancel">Annuler</button><span class="spacer"></span><button class="btn sm ghost" type="button" data-act="taskDel" data-id="${t.id}">Supprimer la tâche</button></div></form>`;
+}
+const editBtn = t => `<button class="x dbtn ${t.detail ? "has" : ""}" data-act="taskEdit" data-id="${t.id}" aria-label="Modifier ${esc(t.title)}" title="Modifier la tâche">${ic("pen", 15)}</button>`;
 function taskRow(t) {
+  if (editT === t.id) return `<div class="item editing">${taskEditForm(t)}</div>`;
   return `<div class="item ${t.done ? "done" : ""}" style="--h:${(tagOf(t.tag) || {h:200}).h}"><span class="prio p${t.prio}" title="Priorité ${["","basse","moyenne","haute"][t.prio]}"></span>
     <input type="checkbox" class="check" data-in="taskDone" data-id="${t.id}" ${t.done ? "checked" : ""} aria-label="Terminer ${esc(t.title)}">
-    <div class="body"><div class="t">${esc(t.title)}${exChip(t)}</div><div class="meta">${tagChip(t.tag)}${dueChip(t.due, t.done)}</div>${detailBox(t.id, t.detail, "taskDetail")}</div>
-    ${detailBtn(t.id, t.detail)}<button class="x" data-act="taskDel" data-id="${t.id}" aria-label="Supprimer">×</button></div>`;
+    <div class="body"><div class="t" data-act="taskEdit" data-id="${t.id}" title="Cliquer pour modifier">${esc(t.title)}${exChip(t)}</div><div class="meta">${tagChip(t.tag)}${dueChip(t.due, t.done)}</div>${detailBox(t.id, t.detail, "taskDetail")}</div>
+    ${editBtn(t)}<button class="x" data-act="taskDel" data-id="${t.id}" aria-label="Supprimer">×</button></div>`;
 }
+ACT.taskEdit = el => { editT = el.dataset.id; render(); const i = $("#te-title-" + editT); if (i) { i.focus(); i.select(); } return false; };
+ACT.taskEditCancel = () => { editT = null; };
+FORM.taskEdit = (f, d) => {
+  const t = S.todo.tasks.find(x => x.id === f.dataset.id); if (!t) { editT = null; return; }
+  t.title = d.get("title") || t.title; t.due = d.get("due") || ""; t.tag = d.get("tag"); t.prio = +d.get("prio") || 2;
+  t.status = d.get("status") || "todo"; t.done = t.status === "done"; t.detail = d.get("detail") || ""; delete t.ex;
+  editT = null; save("todo"); toast("Tâche modifiée");
+};
+document.addEventListener("keydown", e => { if (e.key === "Escape" && editT) { editT = null; render(); } });
 R.todo = () => {
   const T = today(), P = S.prefs; const tasks = S.todo.tasks.filter(t => P.todoTag === "all" || t.tag === P.todoTag);
   const open = tasks.filter(t => !t.done), done = tasks.filter(t => t.done);
@@ -909,8 +949,8 @@ const KCOLS = [["todo","À faire"],["doing","En cours"],["done","Fait"]];
 function kanban(tasks) {
   return `<div class="kanban">${KCOLS.map(([k, n], ci) => { const l = tasks.filter(t => (t.status || "todo") === k).sort((a, b) => (a.due || "9").localeCompare(b.due || "9") || b.prio - a.prio);
     return `<section class="kcol" data-col="${k}"><h2>${n} <span class="sub">${l.length}</span></h2>
-      ${l.map(t => `<article class="kcard" draggable="true" data-task="${t.id}" style="--h:${(tagOf(t.tag) || {h:200}).h}"><div class="t">${esc(t.title)}${exChip(t)}</div><div class="meta">${tagChip(t.tag)}${dueChip(t.due, t.done)}</div>${t.detail ? `<p class="detail-prev">${esc(t.detail.split("\n")[0].slice(0, 90))}</p>` : ""}
-        <div class="kact">${ci > 0 ? `<button class="btn sm ghost" data-act="kMove" data-id="${t.id}" data-to="${KCOLS[ci - 1][0]}" aria-label="Vers ${KCOLS[ci - 1][1]}">←</button>` : ""}<span class="spacer"></span><button class="x" data-act="taskDel" data-id="${t.id}" aria-label="Supprimer">×</button>${ci < 2 ? `<button class="btn sm ghost" data-act="kMove" data-id="${t.id}" data-to="${KCOLS[ci + 1][0]}" aria-label="Vers ${KCOLS[ci + 1][1]}">→</button>` : ""}</div></article>`).join("") || `<p class="kempty">Glisse une carte ici</p>`}</section>`; }).join("")}</div>`;
+      ${l.map(t => editT === t.id ? `<article class="kcard editing">${taskEditForm(t)}</article>` : `<article class="kcard" draggable="true" data-task="${t.id}" style="--h:${(tagOf(t.tag) || {h:200}).h}"><div class="t" data-act="taskEdit" data-id="${t.id}" title="Cliquer pour modifier">${esc(t.title)}${exChip(t)}</div><div class="meta">${tagChip(t.tag)}${dueChip(t.due, t.done)}</div>${t.detail ? `<p class="detail-prev">${esc(t.detail.split("\n")[0].slice(0, 90))}</p>` : ""}
+        <div class="kact">${ci > 0 ? `<button class="btn sm ghost" data-act="kMove" data-id="${t.id}" data-to="${KCOLS[ci - 1][0]}" aria-label="Vers ${KCOLS[ci - 1][1]}">←</button>` : ""}<span class="spacer"></span>${editBtn(t)}<button class="x" data-act="taskDel" data-id="${t.id}" aria-label="Supprimer">×</button>${ci < 2 ? `<button class="btn sm ghost" data-act="kMove" data-id="${t.id}" data-to="${KCOLS[ci + 1][0]}" aria-label="Vers ${KCOLS[ci + 1][1]}">→</button>` : ""}</div></article>`).join("") || `<p class="kempty">Glisse une carte ici</p>`}</section>`; }).join("")}</div>`;
 }
 const setStatus = (id, s) => { const t = S.todo.tasks.find(x => x.id === id); if (!t) return; t.status = s; t.done = s === "done"; save("todo"); };
 ACT.kMove = el => setStatus(el.dataset.id, el.dataset.to);
@@ -922,7 +962,7 @@ document.addEventListener("drop", e => { const col = e.target.closest && e.targe
 ACT.todoTag = el => { S.prefs.todoTag = el.dataset.id; save("prefs"); };
 ACT.toggleDone = () => { S.prefs.showDone = !S.prefs.showDone; save("prefs"); };
 ACT.clearDone = () => { S.todo.tasks = S.todo.tasks.filter(t => !t.done); save("todo"); };
-ACT.taskDel = el => { S.todo.tasks = S.todo.tasks.filter(t => t.id !== el.dataset.id); save("todo"); };
+ACT.taskDel = el => { if (editT === el.dataset.id) editT = null; S.todo.tasks = S.todo.tasks.filter(t => t.id !== el.dataset.id); save("todo"); };
 ACT.tagDel = el => { if (S.todo.tags.length <= 1) return toast("Garde au moins une étiquette"); S.todo.tags = S.todo.tags.filter(t => t.id !== el.dataset.id); if (S.prefs.todoTag === el.dataset.id) S.prefs.todoTag = "all"; save("todo"); save("prefs"); };
 IN.taskDetail = el => { S.todo.tasks.find(x => x.id === el.dataset.id).detail = el.value; grow(el); save("todo"); return false; };
 IN.taskDone = el => { const t = S.todo.tasks.find(x => x.id === el.dataset.id); t.done = el.checked; t.status = el.checked ? "done" : "todo"; save("todo"); if (el.checked) toast("Bien joué !"); setTimeout(render, 250); return false; };
@@ -1338,9 +1378,10 @@ IN.intent = el => { S.foi.intentions = el.value; save("foi"); return false; };
 R.reglages = () => head("Réglages", "Sauvegarde et réglages", "") +
   `<div class="grid-2">
   <section class="card"><h2>${ic("gear")}Où sont mes données ?</h2>
-    ${window.SITE_CONFIG ? `<p>${COL ? "Tes données sont enregistrées sur ton compte : tu les retrouves sur ton ordi et ton téléphone dès que tu es connectée. Une copie reste aussi dans ce navigateur." : "Tu n'es pas connectée : tes changements restent dans ce navigateur."}</p><div class="row"><span class="small muted">${SB_USER ? "Connectée avec " + esc(SB_USER.email) : ""}</span>${SB_USER ? `<button class="btn sm" data-act="logout">Se déconnecter</button>` : `<button class="btn sm pri" data-act="loginOpen">Se connecter</button>`}</div>` : `<p>${COL ? "Tes données sont enregistrées sur ton compte Claude : tu les retrouves sur tous tes appareils où tu es connectée. Une copie reste aussi dans ce navigateur." : "Tes données sont enregistrées dans ce navigateur. Connecte-toi à ton compte Claude pour les retrouver sur tous tes appareils."}</p>`}
+    ${window.SITE_CONFIG ? `<p>${syncErr && SB_USER ? "Tu es connectée, mais l'envoi vers ton compte échoue pour l'instant : tes changements sont gardés dans ce navigateur (voir plus bas)." : COL ? "Tes données sont enregistrées sur ton compte : tu les retrouves sur ton ordi et ton téléphone dès que tu es connectée. Une copie reste aussi dans ce navigateur." : "Tu n'es pas connectée : tes changements restent dans ce navigateur."}</p><div class="row"><span class="small muted">${SB_USER ? "Connectée avec " + esc(SB_USER.email) : ""}</span>${SB_USER ? `<button class="btn sm" data-act="logout">Se déconnecter</button>` : `<button class="btn sm pri" data-act="loginOpen">Se connecter</button>`}</div>` : `<p>${COL ? "Tes données sont enregistrées sur ton compte Claude : tu les retrouves sur tous tes appareils où tu es connectée. Une copie reste aussi dans ce navigateur." : "Tes données sont enregistrées dans ce navigateur. Connecte-toi à ton compte Claude pour les retrouver sur tous tes appareils."}</p>`}
     <p class="muted small">Elles sont privées : personne d'autre ne peut les lire, même si tu partages le lien de la page. Si la page est ouverte sur deux appareils, les changements de l'un apparaissent sur l'autre en quelques secondes.</p>
-    <div class="row"><button class="btn" data-act="syncNow">${ic("upload", 16)}Synchroniser maintenant</button><span class="small muted">État : ${esc($("#sync").textContent)} · version de la page ${PAGE_VERSION}</span></div></section>
+    <div class="row"><button class="btn" data-act="syncNow">${ic("upload", 16)}Synchroniser maintenant</button><span class="small muted">État : ${esc($("#sync").textContent)}${dirty.size ? " · " + dirty.size + " rubrique" + (dirty.size > 1 ? "s" : "") + " en attente d'envoi" : ""} · version de la page ${PAGE_VERSION}</span></div>
+    ${typeof repairBox === "function" ? repairBox() : ""}</section>
   <section class="card"><h2>${ic("gear")}Personnaliser</h2><form class="add" data-form="prefName"><label class="f" style="flex:1">Ton prénom<input type="text" id="p-name" name="n" value="${esc(S.prefs.name)}"></label><button class="btn">Enregistrer</button></form>
     <div class="row"><span class="small muted">Thème :</span>${[["auto","Auto"],["light","Clair"],["dark","Sombre"]].map(([k, l]) => `<button class="btn sm ${S.prefs.theme === k ? "on" : ""}" data-act="setTheme" data-t="${k}">${l}</button>`).join("")}</div></section>
   <section class="card"><h2>${ic("list")}Exemples</h2><p class="muted small">La page s'est ouverte avec quelques exemples (marqués « exemple ») pour te montrer chaque rubrique.</p><div><button class="btn" data-act="clearEx">Retirer tous les exemples</button></div></section>
@@ -1440,7 +1481,14 @@ ACT.exportCopy = () => { const txt = JSON.stringify(S); navigator.clipboard.writ
 ACT.importDo = () => { try { const o = JSON.parse($("#imp").value); let n = 0; for (const k of KEYS) if (o[k]) { S[k] = o[k]; save(k); n++; } if (!n) throw 0; toast("Sauvegarde restaurée"); applyTheme(); } catch { $("#imp-msg").textContent = "Ce texte n'est pas une sauvegarde valide. Vérifie que tu l'as collé en entier."; return false; } };
 // ---------- Version site : connexion et synchro Supabase ----------
 let SB = null, SB_USER = null;
-function sbClient() { if (!SB) SB = window.supabase.createClient(SITE_CONFIG.url, SITE_CONFIG.key, { auth: { persistSession: true, autoRefreshToken: true } }); return SB; }
+function sbUrl(u) {
+  u = String(u || "").trim();
+  const dash = u.match(/supabase\.com\/dashboard\/project\/([a-z0-9]+)/i); if (dash) return "https://" + dash[1] + ".supabase.co";
+  const m = u.match(/^(?:https?:\/\/)?([a-z0-9-]+\.supabase\.(?:co|in))/i); if (m) return "https://" + m[1];
+  if (/^[a-z0-9]{15,}$/i.test(u)) return "https://" + u + ".supabase.co";
+  return u.replace(/\/+$/, "");
+}
+function sbClient() { if (!SB) SB = window.supabase.createClient(sbUrl(SITE_CONFIG.url), String(SITE_CONFIG.key || "").trim(), { auth: { persistSession: true, autoRefreshToken: true } }); return SB; }
 function loginView(msg) {
   let ov = $("#login");
   if (!ov) { ov = document.createElement("div"); ov.id = "login"; document.body.appendChild(ov); }
@@ -1472,18 +1520,60 @@ FORM.login = async (f, d) => {
 };
 document.addEventListener("click", e => { const b = e.target.closest && e.target.closest('#login button[name="mode"]'); if (b) b.form.__mode = b.value; }, true);
 ACT.loginOpen = () => { loginView(); return false; };
-ACT.logout = async () => { await sbClient().auth.signOut(); COL = null; setSync("local"); loginView(); return false; };
+ACT.logout = async () => { const sb = sbClient(); await sb.auth.signOut(); sb.removeAllChannels(); for (const k in SB_COLS) delete SB_COLS[k]; siteConnect.listening = false; SB_USER = null; COL = null; setSync("local"); loginView(); return false; };
 
+const isJwtErr = e => e && (e.code === "PGRST301" || e.code === "PGRST303" || /JWT|token/i.test(e.message || ""));
+function sbErr(error) {
+  console.warn("Supabase", error);
+  const m = String(error.message || ""), c = String(error.code || "");
+  const code = isJwtErr(error) ? "session expirée, reconnecte-toi"
+    : /row-level security/i.test(m) ? "règle de sécurité refusée"
+    : c === "42501" || /permission denied/i.test(m) ? "droits manquants sur la table"
+    : c === "42P01" || /does not exist|schema cache/i.test(m) ? "table carnet introuvable"
+    : /fetch|network|load failed/i.test(m) ? "pas de connexion"
+    : (m || "connexion");
+  return { code: (c ? c + " : " : "") + code, raw: [c, m, error.details, error.hint].filter(Boolean).join(" · "), retry: /fetch|network|load failed/i.test(m) };
+}
+const SB_REF = () => (sbUrl(SITE_CONFIG.url).match(/https:\/\/([a-z0-9]+)\.supabase/i) || [0, ""])[1];
+const REPAIR_SQL = `-- Réparation de la sauvegarde du Carnet. On peut le lancer plusieurs fois sans risque.
+create table if not exists public.carnet (user_id uuid not null default auth.uid() references auth.users on delete cascade, key text not null, v jsonb not null, at bigint not null, primary key (user_id, key));
+alter table public.carnet enable row level security;
+grant usage on schema public to anon, authenticated;
+grant select, insert, update, delete on public.carnet to authenticated;
+drop policy if exists "mes donnees" on public.carnet;
+create policy "mes donnees" on public.carnet for all to authenticated using (auth.uid() = user_id) with check (auth.uid() = user_id);
+do $$ begin alter publication supabase_realtime add table public.carnet; exception when duplicate_object then null; end $$;
+insert into storage.buckets (id, name, public) values ('docs', 'docs', false) on conflict (id) do nothing;
+drop policy if exists "mes fichiers" on storage.objects;
+create policy "mes fichiers" on storage.objects for all to authenticated using (bucket_id = 'docs' and (storage.foldername(name))[1] = auth.uid()::text) with check (bucket_id = 'docs' and (storage.foldername(name))[1] = auth.uid()::text);
+notify pgrst, 'reload schema';
+select 'Réparation terminée' as resultat;`;
+function repairBox() {
+  if (!syncErr) return "";
+  const db = /droits|sécurité|introuvable|42501|42P01/.test(syncErr);
+  return `<div class="note" style="margin-top:10px"><p><b>La sauvegarde en ligne ne marche pas</b> (${esc(syncErr)}). Rien n'est perdu : tes changements restent dans ce navigateur et repartiront tout seuls dès que ce sera réparé.</p>
+    ${db ? `<p>Pour réparer, en 3 étapes :</p><ol style="margin:4px 0 8px 18px;padding:0"><li>Clique sur « Copier le script ».</li><li>Ouvre <a href="https://supabase.com/dashboard/project/${SB_REF()}/sql/new" target="_blank" rel="noopener">l'éditeur SQL de Supabase</a>, colle le script, puis clique sur « Run » (si un message demande confirmation, accepte).</li><li>Reviens ici et clique sur « Synchroniser maintenant ».</li></ol>
+    <div class="row"><button class="btn pri" data-act="copySql">Copier le script</button></div>
+    <textarea readonly rows="5" style="width:100%;box-sizing:border-box;font:12px ui-monospace,monospace;margin-top:8px">${esc(REPAIR_SQL)}</textarea>` : `<p>Essaie de te déconnecter puis de te reconnecter.</p>`}
+    ${syncErrRaw ? `<p class="small muted">Détail technique : ${esc(syncErrRaw)}</p>` : ""}</div>`;
+}
+ACT.copySql = () => { (navigator.clipboard ? navigator.clipboard.writeText(REPAIR_SQL) : Promise.reject()).then(() => toast("Script copié"), () => { const t = $(".note textarea[readonly]"); if (t) { t.select(); document.execCommand("copy"); toast("Script copié"); } }); return false; };
+const SB_COLS = {};
 function sbCollection(uid) {
+  if (SB_COLS[uid]) return SB_COLS[uid];
   const sb = sbClient(), listeners = {};
   sb.channel("carnet-" + uid).on("postgres_changes", { event: "*", schema: "public", table: "carnet", filter: "user_id=eq." + uid }, p => {
     const row = p.new; if (!row || !row.key || !listeners[row.key]) return;
     listeners[row.key].forEach(fn => fn({ exists: true, data: () => ({ v: row.v, at: Number(row.at) }), metadata: { hasPendingWrites: false } }));
   }).subscribe();
-  return {
-    async getAll() { const { data, error } = await sb.from("carnet").select("key,v,at"); if (error) throw { code: error.code || "connexion" }; return data; },
+  return SB_COLS[uid] = {
+    async getAll() { let { data, error } = await sb.from("carnet").select("key,v,at"); if (error && isJwtErr(error)) { await sb.auth.refreshSession().catch(() => {}); ({ data, error } = await sb.from("carnet").select("key,v,at")); } if (error) throw sbErr(error); return data; },
     doc(k) { return {
-      async set(body) { const { error } = await sb.from("carnet").upsert({ user_id: uid, key: k, v: body.v, at: body.at }); if (error) throw { code: error.code === "PGRST301" ? "session" : (error.message || "connexion") }; },
+      async set(body) {
+        let { error } = await sb.from("carnet").upsert({ user_id: uid, key: k, v: body.v, at: body.at });
+        if (error && isJwtErr(error)) { await sb.auth.refreshSession().catch(() => {}); ({ error } = await sb.from("carnet").upsert({ user_id: uid, key: k, v: body.v, at: body.at })); }
+        if (error) throw sbErr(error);
+      },
       onSnapshot(fn) { (listeners[k] = listeners[k] || []).push(fn); }
     }; }
   };
@@ -1522,12 +1612,18 @@ async function siteConnect() {
     KEYS.forEach(k => { lsSet(k, S[k]); if (before[k] !== JSON.stringify(S[k]) && !toPush.includes(k)) toPush.push(k); });
     COL = col; ASSETS = sbAssets(SB_USER.id);
     toPush.forEach(k => flush(k));
-    KEYS.forEach(listen);
+    if (!siteConnect.listening) { siteConnect.listening = true; KEYS.forEach(listen); }
     lastSync = Date.now(); setSync("ok"); applyTheme(); softRender();
-  } catch (e) { syncErr = (e && e.code) || "connexion"; setSync("err"); }
+  } catch (e) {
+    syncErr = (e && e.code) || "connexion"; syncErrRaw = (e && e.raw) || ""; setSync("err");
+    // Nouvel essai dans 30 s ; l'aide pour réparer s'affiche dans Réglages
+    clearTimeout(siteConnect.t); if (SB_USER) siteConnect.t = setTimeout(siteConnect, 30000);
+    softRender();
+  }
 }
-document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && COL && SB_USER) COL.getAll().then(rows => { let ch = false; rows.forEach(r => { if (KEYS.includes(r.key) && !timers[r.key] && !writing[r.key] && r.at !== echo[r.key] && JSON.stringify(r.v) !== JSON.stringify(S[r.key])) { S[r.key] = r.v; lsSet(r.key, r.v); ch = true; } }); if (ch) { migrate(); softRender(); } }).catch(() => {}); });
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && COL && SB_USER) COL.getAll().then(rows => { let ch = false; rows.forEach(r => { if (KEYS.includes(r.key) && !timers[r.key] && !writing[r.key] && !dirty.has(r.key) && r.at !== echo[r.key] && JSON.stringify(r.v) !== JSON.stringify(S[r.key])) { S[r.key] = r.v; lsSet(r.key, r.v); ch = true; } }); if (ch) { migrate(); softRender(); } }).catch(() => {}); });
 if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(() => {});
+ACT.syncNow = () => { if (!COL) { if (SB_USER) { siteConnect(); toast("Nouvel essai de connexion…"); } else loginView(); return false; } KEYS.forEach(k => flush(k)); toast("Synchronisation lancée"); return false; };
 // ---------- Jeux ----------
 const GAMES = [["sudoku","Sudoku"],["mots","Mots croisés"],["code","Code secret"],["geo","Géographie"]];
 R.jeux = () => {
