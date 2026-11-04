@@ -9,3 +9,4 @@
 7. Sur le téléphone : ouvre l'adresse du site › Partager (ou menu ⋮) › « Sur l'écran d'accueil ».
 
 Mettre à jour plus tard : remplace `index.html` dans le dépôt (Add file › Upload files) par la nouvelle version.
+
