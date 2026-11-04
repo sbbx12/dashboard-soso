@@ -1457,7 +1457,16 @@ FORM.login = async (f, d) => {
   const mode = f.__mode || (document.activeElement && document.activeElement.value) || "in";
   const email = d.get("mail"), password = d.get("pass"), sb = sbClient();
   const r = mode === "up" ? await sb.auth.signUp({ email, password }) : await sb.auth.signInWithPassword({ email, password });
-  if (r.error) { loginView(mode === "up" ? "Création impossible : " + esc(r.error.message) : "Adresse ou mot de passe incorrect."); return false; }
+  if (r.error) {
+    const m = String(r.error.message || ""), c = String(r.error.code || "");
+    const txt = /not confirmed/i.test(m) || c === "email_not_confirmed" ? "Ton adresse n'est pas encore confirmée : clique sur le lien reçu par e-mail (même s'il ouvre une page d'erreur), puis reconnecte-toi."
+      : /invalid login|invalid_credentials/i.test(m + c) ? "Adresse ou mot de passe incorrect. Si tu n'as pas encore de compte, clique d'abord sur « Créer mon compte »."
+      : /already registered|already exists|user_already_exists/i.test(m + c) ? "Un compte existe déjà avec cette adresse : clique sur « Se connecter »."
+      : /fetch|network|load failed/i.test(m) ? "Impossible de joindre Supabase. Vérifie l'adresse et la clé dans config.js."
+      : /api key|apikey|jwt/i.test(m) ? "La clé dans config.js n'est pas reconnue : recopie la clé « anon public »."
+      : (mode === "up" ? "Création impossible : " : "Connexion impossible : ") + esc(m);
+    loginView(txt); return false;
+  }
   if (!r.data.session) { loginView("Compte créé. Confirme ton adresse e-mail (lien reçu par mail), puis connecte-toi."); return false; }
   $("#login").hidden = true; siteConnect(); return false;
 };
