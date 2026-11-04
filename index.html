@@ -324,6 +324,9 @@ ol.loi li::marker{font-family:var(--f-display);font-weight:800;color:var(--a)}
 .opts button.wrong{background:color-mix(in oklab,var(--danger) 22%,var(--surface));border-color:var(--danger)}
 .q-big{font-family:var(--f-display);font-size:24px;font-weight:700}
 .gcal-f{width:100%;border:0;border-radius:12px;background:#fff;display:block}
+.swatches{display:flex;gap:5px;flex-wrap:wrap;flex-basis:100%}
+.sw{width:22px;height:22px;border-radius:50%;border:2px solid var(--surface);box-shadow:0 0 0 1px var(--line);cursor:pointer;padding:0}
+.sw[aria-pressed="true"]{box-shadow:0 0 0 2px var(--ink)}
 .tr-q{gap:14px}
 .tr-text{font-size:17px;line-height:1.5;font-weight:600}
 .tr-text.sm{font-size:14px}
@@ -581,7 +584,7 @@ const PAGES = [["","Aucune page"],["suf","SUF · Pôle camp"],["cours","Cours"],
 function seed(k) {
   const T = today(), M = monday(T);
   switch (k) {
-    case "prefs": return { name: "Solène", theme: "auto", todoTag: "all", todoView: "liste", sufTab: "plan", ideeTab: "notes", showDone: false, coursSel: "", jeu: "sudoku", examplesRemoved: false, gMode: "", gSel: "all", trCat: "num" };
+    case "prefs": return { name: "Solène", theme: "auto", todoTag: "all", todoView: "liste", sufTab: "plan", ideeTab: "notes", showDone: false, coursSel: "", jeu: "sudoku", examplesRemoved: false, gMode: "", gSel: "all", trCat: "num", gHome: true, gHomeMode: "AGENDA" };
     case "todo": return {
       tags: [{id:"perso",name:"Perso",h:165,page:""},{id:"suf",name:"SUF",h:135,page:"suf"},{id:"cours",name:"Cours",h:305,page:"cours"},{id:"sport",name:"Sport",h:45,page:"sport"},{id:"admin",name:"Admin",h:220,page:""}],
       tasks: [
@@ -708,7 +711,7 @@ const dirty = new Set(lsGet("dirty") || []);
 const _dAdd = dirty.add.bind(dirty), _dDel = dirty.delete.bind(dirty);
 dirty.add = k => { _dAdd(k); lsSet("dirty", [...dirty]); return dirty; };
 dirty.delete = k => { const r = _dDel(k); lsSet("dirty", [...dirty]); return r; };
-const PAGE_VERSION = "7";
+const PAGE_VERSION = "8";
 function save(k) {
   lsSet(k, S[k]); lsSet("savedAt", Date.now()); if (typeof fileChanged === "function") fileChanged();
   dirty.add(k); if (!COL) return;
@@ -874,7 +877,8 @@ document.addEventListener("change", async e => {
   }
   if (ok) { toast(ok > 1 ? ok + " documents ajoutés" : "Document ajouté"); render(); }
 });
-const dueChip = (d, done) => { if (!d) return ""; const n = diffD(d, today()); const cls = done ? "out" : n < 0 ? "late" : n <= 1 ? "warn" : "out"; return `<span class="chip ${cls}">${n < 0 && !done ? "en retard · " : ""}${fmtShort(d)} · ${rel(d)}</span>`; };
+const dueChip = (d, done, d2) => { if (!d) return ""; const T = today(); if (d2 && d2 > d) { const n = diffD(d2, T), on = d <= T && T <= d2; const cls = done ? "out" : n < 0 ? "late" : on || diffD(d, T) <= 1 ? "warn" : "out"; return `<span class="chip ${cls}">${n < 0 && !done ? "en retard · " : ""}${fmtShort(d)} → ${fmtShort(d2)} · ${on ? "en cours" : rel(n < 0 ? d2 : d)}</span>`; }
+  const n = diffD(d, T); const cls = done ? "out" : n < 0 ? "late" : n <= 1 ? "warn" : "out"; return `<span class="chip ${cls}">${n < 0 && !done ? "en retard · " : ""}${fmtShort(d)} · ${rel(d)}</span>`; };
 
 // ---------- Vues ----------
 
@@ -899,6 +903,7 @@ R.aujourdhui = () => {
     <section class="card" style="--h:250"><h2>${ic("calendar")}Agenda du jour <a class="sub" href="#agenda">Semaine</a></h2>
       ${evs.length ? `<div class="stack">${evs.map(e => evChip(e)).join("")}</div>` : `<p class="empty">Aucun rendez-vous noté pour aujourd'hui.</p>`}
       ${dueOn(T).length ? `<div class="stack" style="gap:2px">${dueOn(T).map(agDueChip).join("")}</div>` : ""}</section>
+    ${gcalHome()}
     <section class="card" style="--h:20"><h2>${ic("cross")}Parole du jour <a class="sub" href="#evangile">Évangile</a></h2>
       <p class="verse" style="font-size:21px">« ${esc(v[0])} »</p><p class="ref">${esc(v[1])}</p>
       <a class="linkbtn" href="https://www.aelf.org/${T}/romain/messe" target="_blank" rel="noopener"><div><b>Lire l'évangile du jour</b><small>Lectures de la messe sur AELF</small></div><span class="arr">→</span></a></section>
@@ -928,6 +933,7 @@ function taskEditForm(t) {
     <label class="f">Tâche<input type="text" id="te-title-${t.id}" name="title" value="${esc(t.title)}" required></label>
     <div class="tedit-row">
       <label class="f">Échéance<input type="date" name="due" value="${esc(t.due || "")}"></label>
+      <label class="f">Jusqu'au<input type="date" name="due2" value="${esc(t.due2 || "")}" title="Pour une tâche sur plusieurs jours, par exemple un week-end"></label>
       <label class="f">Étiquette<select name="tag">${S.todo.tags.map(g => `<option value="${g.id}" ${t.tag === g.id ? "selected" : ""}>${esc(g.name)}</option>`).join("")}</select></label>
       <label class="f">Priorité<select name="prio">${[[1,"Basse"],[2,"Moyenne"],[3,"Haute"]].map(([v, l]) => `<option value="${v}" ${+t.prio === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
       <label class="f">Statut<select name="status">${KCOLS.map(([k, l]) => `<option value="${k}" ${(t.status || "todo") === k ? "selected" : ""}>${l}</option>`).join("")}</select></label>
@@ -940,14 +946,14 @@ function taskRow(t) {
   if (editT === t.id) return `<div class="item editing">${taskEditForm(t)}</div>`;
   return `<div class="item ${t.done ? "done" : ""}" style="--h:${(tagOf(t.tag) || {h:200}).h}"><span class="prio p${t.prio}" title="Priorité ${["","basse","moyenne","haute"][t.prio]}"></span>
     <input type="checkbox" class="check" data-in="taskDone" data-id="${t.id}" ${t.done ? "checked" : ""} aria-label="Terminer ${esc(t.title)}">
-    <div class="body"><div class="t" data-act="taskEdit" data-id="${t.id}" title="Cliquer pour modifier">${esc(t.title)}${exChip(t)}</div><div class="meta">${tagChip(t.tag)}${dueChip(t.due, t.done)}</div>${detailBox(t.id, t.detail, "taskDetail")}</div>
+    <div class="body"><div class="t" data-act="taskEdit" data-id="${t.id}" title="Cliquer pour modifier">${esc(t.title)}${exChip(t)}</div><div class="meta">${tagChip(t.tag)}${dueChip(t.due, t.done, t.due2)}</div>${detailBox(t.id, t.detail, "taskDetail")}</div>
     ${editBtn(t)}<button class="x" data-act="taskDel" data-id="${t.id}" aria-label="Supprimer">×</button></div>`;
 }
 ACT.taskEdit = el => { editT = el.dataset.id; render(); const i = $("#te-title-" + editT); if (i) { i.focus(); i.select(); } return false; };
 ACT.taskEditCancel = () => { editT = null; };
 FORM.taskEdit = (f, d) => {
   const t = S.todo.tasks.find(x => x.id === f.dataset.id); if (!t) { editT = null; return; }
-  t.title = d.get("title") || t.title; t.due = d.get("due") || ""; t.tag = d.get("tag"); t.prio = +d.get("prio") || 2;
+  t.title = d.get("title") || t.title; t.due = d.get("due") || ""; t.due2 = t.due && d.get("due2") > t.due ? d.get("due2") : ""; t.tag = d.get("tag"); t.prio = +d.get("prio") || 2;
   t.status = d.get("status") || "todo"; t.done = t.status === "done"; t.detail = d.get("detail") || ""; delete t.ex;
   editT = null; save("todo"); toast("Tâche modifiée");
 };
@@ -984,7 +990,7 @@ const KCOLS = [["todo","À faire"],["doing","En cours"],["done","Fait"]];
 function kanban(tasks) {
   return `<div class="kanban">${KCOLS.map(([k, n], ci) => { const l = tasks.filter(t => (t.status || "todo") === k).sort((a, b) => (a.due || "9").localeCompare(b.due || "9") || b.prio - a.prio);
     return `<section class="kcol" data-col="${k}"><h2>${n} <span class="sub">${l.length}</span></h2>
-      ${l.map(t => editT === t.id ? `<article class="kcard editing">${taskEditForm(t)}</article>` : `<article class="kcard" draggable="true" data-task="${t.id}" style="--h:${(tagOf(t.tag) || {h:200}).h}"><div class="t" data-act="taskEdit" data-id="${t.id}" title="Cliquer pour modifier">${esc(t.title)}${exChip(t)}</div><div class="meta">${tagChip(t.tag)}${dueChip(t.due, t.done)}</div>${t.detail ? `<p class="detail-prev">${esc(t.detail.split("\n")[0].slice(0, 90))}</p>` : ""}
+      ${l.map(t => editT === t.id ? `<article class="kcard editing">${taskEditForm(t)}</article>` : `<article class="kcard" draggable="true" data-task="${t.id}" style="--h:${(tagOf(t.tag) || {h:200}).h}"><div class="t" data-act="taskEdit" data-id="${t.id}" title="Cliquer pour modifier">${esc(t.title)}${exChip(t)}</div><div class="meta">${tagChip(t.tag)}${dueChip(t.due, t.done, t.due2)}</div>${t.detail ? `<p class="detail-prev">${esc(t.detail.split("\n")[0].slice(0, 90))}</p>` : ""}
         <div class="kact">${ci > 0 ? `<button class="btn sm ghost" data-act="kMove" data-id="${t.id}" data-to="${KCOLS[ci - 1][0]}" aria-label="Vers ${KCOLS[ci - 1][1]}">←</button>` : ""}<span class="spacer"></span>${editBtn(t)}<button class="x" data-act="taskDel" data-id="${t.id}" aria-label="Supprimer">×</button>${ci < 2 ? `<button class="btn sm ghost" data-act="kMove" data-id="${t.id}" data-to="${KCOLS[ci + 1][0]}" aria-label="Vers ${KCOLS[ci + 1][1]}">→</button>` : ""}</div></article>`).join("") || `<p class="kempty">Glisse une carte ici</p>`}</section>`; }).join("")}</div>`;
 }
 const setStatus = (id, s) => { const t = S.todo.tasks.find(x => x.id === id); if (!t) return; t.status = s; t.done = s === "done"; save("todo"); };
@@ -1007,7 +1013,7 @@ let weekOff = 0;
 function dueOn(d) {
   const out = [];
   const T = today();
-  S.todo.tasks.forEach(t => { if (!t.done && t.due && (t.due === d || (d === T && t.due < T))) out.push({title:t.title, h:(tagOf(t.tag) || {h:200}).h, page:"todo", id:t.id, late:t.due < d, prio:t.prio}); });
+  S.todo.tasks.forEach(t => { if (!t.done && t.due) { const end = t.due2 || t.due; if ((t.due <= d && d <= end) || (d === T && end < T)) out.push({title:t.title, h:(tagOf(t.tag) || {h:200}).h, page:"todo", id:t.id, late:end < d, prio:t.prio, span:t.due2 ? `${pISO(t.due).getDate()}–${pISO(t.due2).getDate()}` : ""}); } });
   S.suf.tasks.forEach(t => { if (t.due === d && !t.done) out.push({title:"Camp · " + t.title, h:135, page:"suf"}); });
   S.cours.subjects.forEach(s => s.deadlines.forEach(x => { if (x.date === d && !x.done) out.push({title:s.name + " · " + x.title, h:s.h, page:"cours"}); }));
   return out;
@@ -1080,16 +1086,29 @@ function gcalParse(txt) {
   if (!x.searchParams.getAll("src").length && !x.searchParams.get("cid")) return {err:"Ce code ne contient aucun agenda (paramètre src manquant)."};
   x.protocol = "https:"; return {url: x.toString()};
 }
-function gcalUrl(list) {
-  const x = new URL(list[0].url), seen = new Set(x.searchParams.getAll("src"));
-  for (const g of list.slice(1)) { const y = new URL(g.url), cols = y.searchParams.getAll("color");
-    y.searchParams.getAll("src").forEach((s, i) => { if (seen.has(s)) return; seen.add(s); x.searchParams.append("src", s); if (cols[i]) x.searchParams.append("color", cols[i]); }); }
-  const mode = S.prefs.gMode || (innerWidth < 640 ? "AGENDA" : "WEEK");
-  x.searchParams.set("mode", mode); x.searchParams.set("hl", "fr");
+const GCOLS = [["#D50000","Tomate"],["#E67C73","Flamant"],["#F4511E","Mandarine"],["#F6BF26","Banane"],["#33B679","Sauge"],["#0B8043","Basilic"],["#039BE5","Paon"],["#3F51B5","Myrtille"],["#7986CB","Lavande"],["#8E24AA","Raisin"],["#616161","Graphite"]];
+function gcalUrl(list, mode) {
+  const x = new URL(list[0].url), pairs = [], seen = new Set();
+  list.forEach((g, gi) => { const y = new URL(g.url), cols = y.searchParams.getAll("color");
+    y.searchParams.getAll("src").forEach((src, i) => { if (seen.has(src)) return; seen.add(src); pairs.push([src, g.color || cols[i] || GCOLS[(gi * 3 + i) % GCOLS.length][0]]); }); });
+  x.searchParams.delete("src"); x.searchParams.delete("color");
+  pairs.forEach(([src, c]) => { x.searchParams.append("src", src); x.searchParams.append("color", c); });
+  x.searchParams.set("mode", mode || S.prefs.gMode || (innerWidth < 640 ? "AGENDA" : "WEEK")); x.searchParams.set("hl", "fr");
   if (!x.searchParams.get("ctz")) x.searchParams.set("ctz", Intl.DateTimeFormat().resolvedOptions().timeZone || "Europe/Paris");
   if (!x.searchParams.get("wkst")) x.searchParams.set("wkst", "2");
   return x.toString();
 }
+// Version compacte pour la page Aujourd'hui
+function gcalHome() {
+  const G = S.agenda.gcal; if (!G.length || !S.prefs.gHome) return "";
+  const mode = S.prefs.gHomeMode || "AGENDA";
+  return `<section class="card" style="--h:250;grid-column:1/-1"><h2>${ic("calendar")}Google Agenda <a class="sub" href="#agenda">Tout l'agenda</a></h2>
+    <div class="tabs">${[["AGENDA","Liste"],["WEEK","Semaine"],["MONTH","Mois"]].map(([k, n]) => `<button data-act="gHomeMode" data-k="${k}" aria-pressed="${mode === k}">${n}</button>`).join("")}</div>
+    ${GCAL_OK() ? `<iframe class="gcal-f" src="${esc(gcalUrl(G, mode))}" title="Google Agenda" loading="lazy" style="height:${mode === "AGENDA" ? 380 : 560}px"></iframe>` : `<p class="muted small">Tes agendas Google s'affichent ici sur ton site.</p>`}</section>`;
+}
+ACT.gHomeMode = el => { S.prefs.gHomeMode = el.dataset.k; save("prefs"); };
+ACT.gHome = () => { S.prefs.gHome = !S.prefs.gHome; save("prefs"); };
+ACT.gcColor = el => { const g = S.agenda.gcal.find(x => x.id === el.dataset.id); if (g) { g.color = el.dataset.c; save("agenda"); } };
 function gcalCard() {
   const G = S.agenda.gcal; if (!G.length) return "";
   const sel = S.prefs.gSel === "all" || !G.some(g => g.id === S.prefs.gSel) ? "all" : S.prefs.gSel;
@@ -1106,7 +1125,9 @@ let gcalErr = "", gcalDraft = {n:"", c:""};
 function gcalSetup() {
   const G = S.agenda.gcal;
   return `<section class="card"><h2>${ic("calendar")}Mes agendas Google affichés ici</h2>
-    ${G.length ? `<div class="list">${G.map(g => `<div class="item" style="align-items:center"><input type="text" id="gc-n-${g.id}" value="${esc(g.name)}" data-in="gcName" data-id="${g.id}" aria-label="Nom de l'agenda" style="flex:1 1 120px;font-weight:600"><span class="small muted">${new URL(g.url).searchParams.getAll("src").length} calendrier${new URL(g.url).searchParams.getAll("src").length > 1 ? "s" : ""}</span><button class="x" data-act="gcDel" data-id="${g.id}">Retirer</button></div>`).join("")}</div>` : `<p class="muted small">Aucun pour l'instant. Colle le code d'intégration d'un agenda : il s'affichera en haut de cette page, sur ton site.</p>`}
+    ${G.length ? `<div class="list">${G.map(g => `<div class="item" style="align-items:center;flex-wrap:wrap"><input type="text" id="gc-n-${g.id}" value="${esc(g.name)}" data-in="gcName" data-id="${g.id}" aria-label="Nom de l'agenda" style="flex:1 1 120px;font-weight:600"><span class="small muted">${new URL(g.url).searchParams.getAll("src").length} calendrier${new URL(g.url).searchParams.getAll("src").length > 1 ? "s" : ""}</span><button class="x" data-act="gcDel" data-id="${g.id}">Retirer</button>
+      <div class="swatches" role="group" aria-label="Couleur de ${esc(g.name)}">${GCOLS.map(([c, n]) => `<button class="sw" data-act="gcColor" data-id="${g.id}" data-c="${c}" style="background:${c}" title="${n}" aria-label="${n}" aria-pressed="${g.color === c}"></button>`).join("")}</div></div>`).join("")}</div>
+      <label class="row small"><input type="checkbox" ${S.prefs.gHome ? "checked" : ""} data-act="gHome"> Afficher aussi Google Agenda sur la page Aujourd'hui</label>` : `<p class="muted small">Aucun pour l'instant. Colle le code d'intégration d'un agenda : il s'affichera en haut de cette page, sur ton site.</p>`}
     <form class="stack" data-form="gcAdd">
       <input type="text" id="gc-name" name="n" value="${esc(gcalDraft.n)}" placeholder="Nom (ex. Perso, SUF, Fac)" required>
       <textarea id="gc-code" name="c" rows="3" placeholder='Colle ici le code d&#39;intégration : &lt;iframe src="https://calendar.google.com/calendar/embed?src=…"&gt;&lt;/iframe&gt;' required>${esc(gcalDraft.c)}</textarea>
@@ -1129,7 +1150,7 @@ IN.gcName = el => { const g = S.agenda.gcal.find(x => x.id === el.dataset.id); i
 // Tâches de la to-do dans l'agenda
 function agDueChip(t) {
   if (t.page !== "todo") return `<a class="due-t" style="--h:${t.h}" href="#${t.page}">${ic("check", 13)}<span>${esc(t.title)}</span></a>`;
-  return `<div class="due-t todo-t ${t.late ? "late" : ""}" style="--h:${t.h}"><button class="tick" data-act="agDone" data-id="${t.id}" aria-label="Marquer « ${esc(t.title)} » comme faite" title="Marquer comme faite"></button><a href="#todo">${esc(t.title)}${t.late ? ` <span class="lt">en retard</span>` : ""}</a></div>`;
+  return `<div class="due-t todo-t ${t.late ? "late" : ""}" style="--h:${t.h}"><button class="tick" data-act="agDone" data-id="${t.id}" aria-label="Marquer « ${esc(t.title)} » comme faite" title="Marquer comme faite"></button><a href="#todo">${esc(t.title)}${t.span ? ` <span class="small muted">(${t.span})</span>` : ""}${t.late ? ` <span class="lt">en retard</span>` : ""}</a></div>`;
 }
 ACT.agDone = el => { const t = S.todo.tasks.find(x => x.id === el.dataset.id); if (!t) return; t.done = true; t.status = "done"; save("todo"); toast("Tâche faite : " + t.title); };
 function undatedBlock() {
@@ -1233,14 +1254,14 @@ function sufItems() {
   const out = [];
   S.suf.tasks.forEach(t => t.due && out.push({d:t.due, title:t.title, done:t.done, h:135}));
   const tags = S.todo.tags.filter(t => t.page === "suf").map(t => t.id);
-  S.todo.tasks.forEach(t => t.due && tags.includes(t.tag) && out.push({d:t.due, title:t.title, done:t.done, h:200}));
+  S.todo.tasks.forEach(t => t.due && tags.includes(t.tag) && out.push({d:t.due, d2:t.due2 || "", title:t.title, done:t.done, h:200}));
   const accs = S.agenda.accounts.filter(a => /suf|scout/i.test(a.name)).map(a => a.id);
   S.agenda.events.forEach(e => accs.includes(e.acc) && e.date >= addD(today(), -31) && out.push({d:e.date, title:e.title, done:false, h:250}));
   return out.sort((a, b) => a.d.localeCompare(b.d));
 }
 function sufCalendar() {
   const T = today(), items = sufItems();
-  const last = [addD(T, 120), ...items.map(i => i.d)].sort().pop();
+  const last = [addD(T, 120), ...items.map(i => i.d2 || i.d)].sort().pop();
   let y = pISO(T).getFullYear(), m = pISO(T).getMonth();
   const late = items.find(i => i.d.slice(0, 7) < T.slice(0, 7) && !i.done);
   if (late) { y = pISO(late.d).getFullYear(); m = pISO(late.d).getMonth(); }
@@ -1251,13 +1272,13 @@ function sufCalendar() {
     <div class="legend row small muted"><span class="row" style="gap:5px"><i class="lg" style="--h:135"></i>Actions du rétroplanning</span><span class="row" style="gap:5px"><i class="lg" style="--h:200"></i>To-do SUF</span><span class="row" style="gap:5px"><i class="lg" style="--h:250"></i>Rendez-vous SUF</span></div>
     <div class="months">${months.map(k => {
       const [yy, mm] = k.split("-").map(Number), d1 = new Date(yy, mm - 1, 1), nd = new Date(yy, mm, 0).getDate(), off = (d1.getDay() + 6) % 7;
-      const mi = items.filter(i => i.d.startsWith(k));
+      const mi = items.filter(i => i.d <= k + "-31" && (i.d2 || i.d) >= k + "-01");
       let cells = "";
       for (let i = 0; i < off; i++) cells += `<span></span>`;
-      for (let d = 1; d <= nd; d++) { const ds = k + "-" + pad(d), its = mi.filter(i => i.d === ds);
+      for (let d = 1; d <= nd; d++) { const ds = k + "-" + pad(d), its = mi.filter(i => i.d <= ds && ds <= (i.d2 || i.d));
         cells += `<span class="mc ${ds === T ? "now" : ""} ${its.length ? "has" : ""}" ${its.length ? `style="--h:${its[0].h}" title="${esc(its.map(i => i.title).join(" · "))}"` : ""}>${d}</span>`; }
       return `<div class="month"><h3>${MOIS[mm - 1]} ${yy}</h3><div class="mgrid">${["L","M","M","J","V","S","D"].map(x => `<b>${x}</b>`).join("")}${cells}</div>
-        <div class="mlist">${mi.map(i => `<div class="mrow ${i.done ? "done" : ""}" style="--h:${i.h}"><span class="mday">${pISO(i.d).getDate()}</span><span>${esc(i.title)}</span></div>`).join("") || `<span class="small muted">Rien de prévu.</span>`}</div></div>`; }).join("")}</div></section>`;
+        <div class="mlist">${mi.map(i => `<div class="mrow ${i.done ? "done" : ""}" style="--h:${i.h}"><span class="mday">${pISO(i.d).getDate()}${i.d2 ? "–" + (i.d2.slice(0, 7) === i.d.slice(0, 7) ? "" : "") + pISO(i.d2).getDate() + (i.d2.slice(0, 7) !== i.d.slice(0, 7) ? " " + MOIS[pISO(i.d2).getMonth()].slice(0, 4) + "." : "") : ""}</span><span>${esc(i.title)}</span></div>`).join("") || `<span class="small muted">Rien de prévu.</span>`}</div></div>`; }).join("")}</div></section>`;
 }
 function sufTaskRow(t) {
   const o = openD.has(t.id);
