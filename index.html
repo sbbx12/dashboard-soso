@@ -370,6 +370,31 @@ ol.loi li::marker{font-family:var(--f-display);font-weight:800;color:var(--a)}
 .fade{animation:fade .35s ease both}
 @keyframes fade{from{opacity:.6;transform:translateY(4px)}to{opacity:1;transform:none}}
 .toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:9px 16px;border-radius:12px;font-weight:600;font-size:14px;z-index:50;box-shadow:var(--shadow)}
+.morning .m-grid{display:grid;gap:20px;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr))}
+.morning .m-col{display:flex;flex-direction:column;gap:8px;min-width:0}
+.m-lbl{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);display:flex;align-items:center;gap:8px;margin-top:4px}
+.sm-link{font-size:12px;text-transform:none;letter-spacing:0;color:var(--a);font-weight:700;margin-left:auto}
+.moods,.energy{display:flex;gap:6px;flex-wrap:wrap}
+.mood{font-size:24px;line-height:1;width:46px;height:46px;border-radius:14px;border:1px solid var(--line);background:var(--surface);cursor:pointer;filter:grayscale(.7);opacity:.75;transition:transform .15s,filter .15s,opacity .15s}
+.mood:hover{transform:translateY(-2px);opacity:1}
+.mood.on{filter:none;opacity:1;background:var(--t);border-color:var(--a);transform:scale(1.08)}
+.en{font-size:18px;width:36px;height:36px;border-radius:10px;border:1px solid var(--line);background:var(--surface);cursor:pointer;filter:grayscale(1);opacity:.45}
+.en.on{filter:none;opacity:1;background:var(--t);border-color:var(--a)}
+.m-in{width:100%;font:inherit;padding:9px 12px;border-radius:10px;border:1px solid var(--line);background:var(--surface-2);color:inherit}
+.habits{display:flex;flex-wrap:wrap;gap:8px}
+.hab-w{display:inline-flex;align-items:center;gap:2px}
+.hab{display:inline-flex;align-items:center;gap:6px;font:inherit;font-weight:600;font-size:13px;padding:7px 12px;border-radius:20px;border:1px solid var(--line);background:var(--surface);color:inherit;cursor:pointer;transition:background .15s,transform .1s}
+.hab:active{transform:scale(.96)}
+.hab .he{filter:grayscale(1);opacity:.6}
+.hab.on{background:var(--a);border-color:var(--a);color:#fff}
+.hab.on .he{filter:none;opacity:1}
+.week-dots{display:flex;gap:8px;justify-content:space-between}
+.wd{display:flex;flex-direction:column;align-items:center;gap:4px;flex:1}
+.wd-m{font-size:16px;height:20px}
+.wd-b{width:100%;max-width:26px;height:46px;border-radius:8px;background:var(--surface-2);display:flex;align-items:flex-end;overflow:hidden}
+.wd-b > span{display:block;width:100%;background:var(--a);border-radius:8px}
+.wd-l{font-size:11px;color:var(--muted);font-weight:700}
+.wd.today .wd-l{color:var(--a)}
 </style>
 
 </head><body>
@@ -579,8 +604,9 @@ function temps(s) {
 }
 
 // ---------- État & persistance ----------
-const KEYS = ["todo","agenda","suf","sport","cours","idees","foi","jeux","prefs","docs","train"];
+const KEYS = ["todo","agenda","suf","sport","cours","idees","foi","jeux","prefs","docs","train","journal"];
 const PAGES = [["","Aucune page"],["suf","SUF · Pôle camp"],["cours","Cours"],["sport","Sport"],["agenda","Agenda"],["evangile","Évangile"]];
+const HABITS0 = [{id:"priere",e:"🙏",n:"Prière"},{id:"evangile",e:"📖",n:"Évangile lu"},{id:"sport",e:"🏃‍♀️",n:"Sport"},{id:"revisions",e:"📚",n:"Révisions"},{id:"eau",e:"💧",n:"2 L d'eau"},{id:"ecran",e:"📵",n:"Pas d'écran au lit"},{id:"coucher",e:"🌙",n:"Couchée avant 23 h"}];
 function seed(k) {
   const T = today(), M = monday(T);
   switch (k) {
@@ -644,6 +670,7 @@ function seed(k) {
     case "jeux": return { sudoku: null, best: { geo: 0, mm: 0, sdk: {} } };
     case "docs": return { files: [] };
     case "train": return { hist: [] };
+    case "journal": return { habits: HABITS0.map(h => ({...h})), days: {} };
   }
 }
 function sufSeed() {
@@ -701,6 +728,7 @@ function migrate() {
   for (const ac of S.agenda.accounts) if (ac.url === undefined) ac.url = "";
   if (!S.agenda.gcal) S.agenda.gcal = [];
   if (!S.train || !S.train.hist) S.train = seed("train");
+  if (!S.journal || !S.journal.days) S.journal = seed("journal");
 }
 migrate();
 
@@ -711,7 +739,7 @@ const dirty = new Set(lsGet("dirty") || []);
 const _dAdd = dirty.add.bind(dirty), _dDel = dirty.delete.bind(dirty);
 dirty.add = k => { _dAdd(k); lsSet("dirty", [...dirty]); return dirty; };
 dirty.delete = k => { const r = _dDel(k); lsSet("dirty", [...dirty]); return r; };
-const PAGE_VERSION = "9";
+const PAGE_VERSION = "10";
 function save(k) {
   lsSet(k, S[k]); lsSet("savedAt", Date.now()); if (typeof fileChanged === "function") fileChanged();
   dirty.add(k); if (!COL) return;
@@ -917,6 +945,7 @@ R.aujourdhui = () => {
   const sufDone = S.suf.tasks.filter(t => t.done).length, sufAll = S.suf.tasks.length;
   return head(fmtLong(T), `${hello} ${esc(S.prefs.name)}`, `${feteLabel(f)} · ${tp}. Voici ce qui compte aujourd'hui.`,
     `<a class="btn pri" href="#todo">Ajouter une tâche</a><a class="btn" href="#idees">Noter une idée</a>`) +
+  morningCard() +
   `<div class="grid">
     <section class="card" style="--h:200"><h2>${ic("check")}À faire bientôt <a class="sub" href="#todo">Tout voir</a></h2>
       ${tasks.length ? `<div class="list">${tasks.slice(0, 6).map(taskRow).join("")}</div>` : `<p class="empty">Rien d'urgent dans les trois prochains jours. Profites-en !</p>`}</section>
@@ -944,6 +973,49 @@ R.aujourdhui = () => {
   <section class="card" style="--h:90"><h2>${ic("bulb")}Une idée en passant ?</h2>
     <form class="add" data-form="quickIdea"><input type="text" id="qi" name="t" placeholder="Écris-la ici, elle part dans tes idées" required><button class="btn pri">Garder</button></form></section>`;
 };
+// Journal du matin et habitudes
+const MOODS = [["5","🤩","Au top"],["4","😊","Bien"],["3","😐","Bof"],["2","😔","Pas terrible"],["1","😫","Épuisée"]];
+const jDay = d => S.journal.days[d] || (S.journal.days[d] = { mood: "", energy: 0, intention: "", gratitude: "", done: [] });
+const jGet = d => S.journal.days[d];
+const jScore = d => { const j = jGet(d), n = S.journal.habits.length; return j && n ? j.done.filter(x => S.journal.habits.some(h => h.id === x)).length / n : 0; };
+const jStreak = () => { let n = 0, d = today(); if (jScore(d) === 0) d = addD(d, -1); while (jScore(d) > 0) { n++; d = addD(d, -1); } return n; };
+let habEdit = false;
+function morningCard() {
+  const T = today(), j = jGet(T) || { mood: "", energy: 0, intention: "", gratitude: "", done: [] }, H = S.journal.habits;
+  const pct = Math.round(jScore(T) * 100), st = jStreak();
+  const week = [...Array(7)].map((_, i) => addD(T, i - 6));
+  const wAvg = Math.round(week.reduce((a, d) => a + jScore(d), 0) / 7 * 100);
+  return `<section class="card morning fade" style="--h:45">
+    <h2>${ic("sun")}Mon matin <span class="sub">${pct}% de mes habitudes${st ? ` · 🔥 ${st} jour${st > 1 ? "s" : ""} d'affilée` : ""}</span></h2>
+    <div class="m-grid">
+      <div class="m-col">
+        <p class="m-lbl">Comment je me sens ?</p>
+        <div class="moods">${MOODS.map(([v, e, n]) => `<button class="mood ${j.mood === v ? "on" : ""}" data-act="jMood" data-v="${v}" title="${n}" aria-label="${n}" aria-pressed="${j.mood === v}">${e}</button>`).join("")}</div>
+        <p class="m-lbl">Mon énergie</p>
+        <div class="energy">${[1,2,3,4,5].map(n => `<button class="en ${j.energy >= n ? "on" : ""}" data-act="jEnergy" data-v="${n}" aria-label="Énergie ${n} sur 5">⚡</button>`).join("")}</div>
+        <p class="m-lbl">Mon intention du jour</p>
+        <input type="text" class="m-in" data-in="jText" data-f="intention" value="${esc(j.intention)}" placeholder="Aujourd'hui, je veux…">
+        <p class="m-lbl">Merci pour…</p>
+        <input type="text" class="m-in" data-in="jText" data-f="gratitude" value="${esc(j.gratitude)}" placeholder="Une chose pour laquelle je rends grâce">
+      </div>
+      <div class="m-col">
+        <p class="m-lbl">Mes habitudes <button class="x sm-link" data-act="habEdit">${habEdit ? "Terminé" : "Modifier"}</button></p>
+        <div class="habits">${H.map(h => `<span class="hab-w"><button class="hab ${j.done.includes(h.id) ? "on" : ""}" data-act="jHab" data-id="${h.id}" aria-pressed="${j.done.includes(h.id)}"><span class="he">${esc(h.e)}</span>${esc(h.n)}</button>${habEdit ? `<button class="x" data-act="habDel" data-id="${h.id}" aria-label="Retirer ${esc(h.n)}">×</button>` : ""}</span>`).join("")}</div>
+        ${habEdit ? `<form class="add" data-form="habAdd"><input type="text" name="e" placeholder="🙂" maxlength="4" style="width:56px;flex:0 0 auto"><input type="text" name="n" placeholder="Nouvelle habitude" required><button class="btn pri sm">Ajouter</button></form>` : ""}
+        <div class="bar"><span style="width:${pct}%"></span></div>
+        <p class="m-lbl">Mes 7 derniers jours <span class="muted small">· moyenne ${wAvg}%</span></p>
+        <div class="week-dots">${week.map(d => { const s = jScore(d), m = (jGet(d) || {}).mood; const mo = MOODS.find(x => x[0] === m); return `<div class="wd ${d === T ? "today" : ""}" title="${fmtLong(d)} : ${Math.round(s * 100)}%"><span class="wd-m">${mo ? mo[1] : "·"}</span><span class="wd-b"><span style="height:${Math.round(s * 100)}%"></span></span><span class="wd-l">${JC[pISO(d).getDay()].slice(0, 1).toUpperCase()}</span></div>`; }).join("")}</div>
+      </div>
+    </div>
+  </section>`;
+}
+ACT.jMood = el => { const j = jDay(today()); j.mood = j.mood === el.dataset.v ? "" : el.dataset.v; save("journal"); };
+ACT.jEnergy = el => { const j = jDay(today()); const v = +el.dataset.v; j.energy = j.energy === v ? 0 : v; save("journal"); };
+ACT.jHab = el => { const j = jDay(today()), id = el.dataset.id; const had = j.done.includes(id); j.done = had ? j.done.filter(x => x !== id) : j.done.concat(id); save("journal"); if (!had && jScore(today()) === 1) toast("Toutes tes habitudes du jour : bravo !"); };
+ACT.habEdit = () => { habEdit = !habEdit; };
+ACT.habDel = el => { S.journal.habits = S.journal.habits.filter(h => h.id !== el.dataset.id); save("journal"); };
+FORM.habAdd = (f, d) => { const n = d.get("n"); if (!n) return false; S.journal.habits.push({ id: uid(), e: d.get("e") || "✨", n }); save("journal"); };
+IN.jText = el => { jDay(today())[el.dataset.f] = el.value; save("journal"); return false; };
 FORM.quickIdea = (f, d) => { S.idees.notes.unshift({id:uid(),title:"",text:d.get("t"),h:90,pinned:false,at:Date.now()}); save("idees"); toast("Idée gardée dans « Idées »"); };
 
 // To-do
