@@ -395,6 +395,13 @@ ol.loi li::marker{font-family:var(--f-display);font-weight:800;color:var(--a)}
 .wd-b > span{display:block;width:100%;background:var(--a);border-radius:8px}
 .wd-l{font-size:11px;color:var(--muted);font-weight:700}
 .wd.today .wd-l{color:var(--a)}
+.tpicks{display:flex;flex-wrap:wrap;gap:6px;align-items:center;flex-basis:100%}
+.tpick{display:inline-flex;align-items:center;cursor:pointer}
+.tpick input{position:absolute;opacity:0;pointer-events:none}
+.tpick span{font-size:12px;font-weight:700;padding:4px 10px;border-radius:20px;border:1px dashed var(--line);color:var(--muted);transition:background .15s}
+.tpick input:checked + span{background:var(--c);border:1px solid transparent;color:var(--ink)}
+.tpick input:focus-visible + span{outline:2px solid var(--a);outline-offset:2px}
+.tnew{font:inherit;font-size:12px;padding:4px 10px;border-radius:20px;border:1px dashed var(--line);background:transparent;color:inherit;min-width:0;flex:0 1 210px}
 </style>
 
 </head><body>
@@ -604,6 +611,9 @@ function temps(s) {
 }
 
 // ---------- État & persistance ----------
+const tagsOf = t => Array.isArray(t.tags) && t.tags.length ? t.tags : (t.tag ? [t.tag] : []);
+const hasTag = (t, id) => tagsOf(t).includes(id);
+const setTags = (t, ids) => { t.tags = [...new Set(ids.filter(Boolean))]; t.tag = t.tags[0] || ""; };
 const KEYS = ["todo","agenda","suf","sport","cours","idees","foi","jeux","prefs","docs","train","journal"];
 const PAGES = [["","Aucune page"],["suf","SUF · Pôle camp"],["cours","Cours"],["sport","Sport"],["agenda","Agenda"],["evangile","Évangile"]];
 const HABITS0 = [{id:"priere",e:"🙏",n:"Prière"},{id:"evangile",e:"📖",n:"Évangile lu"},{id:"sport",e:"🏃‍♀️",n:"Sport"},{id:"revisions",e:"📚",n:"Révisions"},{id:"eau",e:"💧",n:"2 L d'eau"},{id:"ecran",e:"📵",n:"Pas d'écran au lit"},{id:"coucher",e:"🌙",n:"Couchée avant 23 h"}];
@@ -723,7 +733,7 @@ function migrate() {
     S.suf.cf = S.suf.cf || sd.cf; S.suf.etr = S.suf.etr || sd.etr; S.suf.pole = S.suf.pole || sd.pole; S.suf.v = 2;
   }
   for (const t of S.suf.tasks) if (t.detail === undefined) t.detail = "";
-  for (const t of S.todo.tasks) if (!t.status) t.status = t.done ? "done" : "todo";
+  for (const t of S.todo.tasks) { if (!t.status) t.status = t.done ? "done" : "todo"; if (!Array.isArray(t.tags)) setTags(t, t.tag ? [t.tag] : []); }
   if (!S.idees.carnet) S.idees.carnet = [{id:uid(),title:"Mon premier carnet",text:"Écris ici librement : un compte rendu de réunion, une réflexion, un brouillon de mail…",at:Date.now(),ex:true}];
   for (const ac of S.agenda.accounts) if (ac.url === undefined) ac.url = "";
   if (!S.agenda.gcal) S.agenda.gcal = [];
@@ -739,7 +749,7 @@ const dirty = new Set(lsGet("dirty") || []);
 const _dAdd = dirty.add.bind(dirty), _dDel = dirty.delete.bind(dirty);
 dirty.add = k => { _dAdd(k); lsSet("dirty", [...dirty]); return dirty; };
 dirty.delete = k => { const r = _dDel(k); lsSet("dirty", [...dirty]); return r; };
-const PAGE_VERSION = "10";
+const PAGE_VERSION = "11";
 function save(k) {
   lsSet(k, S[k]); lsSet("savedAt", Date.now()); if (typeof fileChanged === "function") fileChanged();
   dirty.add(k); if (!COL) return;
@@ -838,7 +848,7 @@ function coursLink() {
     const id = "c_" + dl.id;
     const title = `${dl.type} · ${sub.name} : ${dl.title}`;
     let t = S.todo.tasks.find(x => x.id === id);
-    if (!t) { t = {id, title, due:dl.date, tag, prio:3, done:!!dl.done, status:dl.done ? "done" : "todo", detail:"", cours:dl.id}; S.todo.tasks.push(t); ch = true; continue; }
+    if (!t) { t = {id, title, due:dl.date, tag, tags:tag ? [tag] : [], prio:3, done:!!dl.done, status:dl.done ? "done" : "todo", detail:"", cours:dl.id}; S.todo.tasks.push(t); ch = true; continue; }
     if (t.title !== title || t.due !== dl.date) { t.title = title; t.due = dl.date; ch = true; }
     if (!!t.done !== !!dl.done) { dl.done = !!t.done; chC = true; } // cochée dans la to-do ou l'agenda
   }
@@ -867,6 +877,10 @@ const head = (eyebrow, title, lede, side = "") => `<header class="vh fade"><div 
 const exChip = o => o && o.ex ? ` <span class="chip ex">exemple</span>` : "";
 const tagOf = id => S.todo.tags.find(t => t.id === id);
 const tagChip = id => { const t = tagOf(id); if (!t) return ""; return t.page ? `<a class="chip" style="--h:${t.h};text-decoration:none" href="#${t.page}" title="Voir la page ${esc((PAGES.find(p => p[0] === t.page) || [0, ""])[1])}">${ic("tag", 12)}${esc(t.name)}<span aria-hidden="true">↗</span></a>` : `<span class="chip" style="--h:${t.h}">${ic("tag", 12)}${esc(t.name)}</span>`; };
+const tagChips = t => tagsOf(t).map(tagChip).join("");
+const tagHue = t => (tagOf(tagsOf(t)[0]) || {h:200}).h;
+function newTagIds(raw) { const hs = [10,60,110,180,230,280,330,30,150,300]; return String(raw || "").split(",").map(x => x.trim()).filter(Boolean).map(n => { let g = S.todo.tags.find(x => x.name.toLowerCase() === n.toLowerCase()); if (!g) { g = {id:uid(), name:n, h:hs[S.todo.tags.length % hs.length], page:""}; S.todo.tags.push(g); } return g.id; }); }
+const tagPick = (sel, idp) => `<div class="tpicks" role="group" aria-label="Étiquettes">${S.todo.tags.map(g => `<label class="tpick" style="--h:${g.h}"><input type="checkbox" name="tags" value="${g.id}" ${sel.includes(g.id) ? "checked" : ""}><span>${esc(g.name)}</span></label>`).join("")}<input type="text" class="tnew" name="newtags" id="${idp}-new" placeholder="+ nouvelle étiquette (ex. visio)" aria-label="Nouvelles étiquettes, séparées par des virgules"></div>`;
 const openD = new Set();
 const detailBox = (id, text, kind) => openD.has(id) ? `<textarea id="d-${id}" class="detail" data-in="${kind}" data-id="${id}" rows="3" placeholder="Détails, contacts, liens, étapes…">${esc(text || "")}</textarea>` : (text ? `<p class="detail-prev">${esc(text.split("\n")[0].slice(0, 120))}${text.length > 120 || text.includes("\n") ? "…" : ""}</p>` : "");
 const detailBtn = (id, text) => `<button class="x dbtn ${text ? "has" : ""}" data-act="dToggle" data-id="${id}" aria-label="Détails" title="${openD.has(id) ? "Fermer les détails" : "Ajouter ou voir les détails"}">${ic("pen", 15)}</button>`;
@@ -875,14 +889,14 @@ ACT.dToggle = el => { const id = el.dataset.id; openD.has(id) ? openD.delete(id)
 function linkedBlock(page) {
   const tags = S.todo.tags.filter(t => t.page === page).map(t => t.id);
   if (!tags.length) return `<section class="card"><h2>${ic("tag")}Depuis ma to-do et mes idées</h2><p class="muted small">Relie une étiquette à cette page (dans To-do › Étiquettes) : les tâches et idées qui la portent apparaîtront ici.</p></section>`;
-  const tasks = S.todo.tasks.filter(t => tags.includes(t.tag) && !t.done).sort((a, b) => (a.due || "9").localeCompare(b.due || "9"));
+  const tasks = S.todo.tasks.filter(t => tagsOf(t).some(x => tags.includes(x)) && !t.done).sort((a, b) => (a.due || "9").localeCompare(b.due || "9"));
   const ideas = S.idees.notes.filter(n => tags.includes(n.tag));
   return `<section class="card"><h2>${ic("tag")}Depuis ma to-do et mes idées <span class="sub">${tags.map(tagChip).join(" ")}</span></h2>
     ${tasks.length ? `<div class="list">${tasks.map(taskRow).join("")}</div>` : `<p class="muted small">Aucune tâche en cours avec ${tags.length > 1 ? "ces étiquettes" : "cette étiquette"}.</p>`}
     <form class="add" data-form="linkedTask"><input type="hidden" name="tag" value="${tags[0]}"><input type="text" id="lt-${page}" name="t" placeholder="Nouvelle tâche ${esc(tagOf(tags[0]).name)}…" required><input type="date" id="ltd-${page}" name="d" aria-label="Échéance"><button class="btn pri">Ajouter</button></form>
     ${ideas.length ? `<h3 class="row" style="gap:6px">${ic("bulb", 16)}Idées liées</h3><div class="list">${ideas.map(n => `<div class="item"><div class="body"><div class="t">${esc(n.title || "Sans titre")}</div><div class="meta">${esc((n.text || "").slice(0, 140))}</div></div><a class="btn sm ghost" href="#idees">Ouvrir</a></div>`).join("")}</div>` : ""}</section>`;
 }
-FORM.linkedTask = (f, d) => { S.todo.tasks.push({id:uid(),title:d.get("t"),due:d.get("d"),tag:d.get("tag"),prio:2,done:false,status:"todo",detail:""}); save("todo"); };
+FORM.linkedTask = (f, d) => { S.todo.tasks.push({id:uid(),title:d.get("t"),due:d.get("d"),tag:d.get("tag"),tags:[d.get("tag")],prio:2,done:false,status:"todo",detail:""}); save("todo"); };
 // Étiquettes partagées (to-do + idées)
 function tagManager() {
   return `<section class="card"><h2>${ic("tag")}Étiquettes</h2><p class="muted small">Les étiquettes servent à la to-do et aux idées. Relie-en une à une page : ses tâches et idées s'y afficheront aussi.</p>
@@ -1021,37 +1035,37 @@ FORM.quickIdea = (f, d) => { S.idees.notes.unshift({id:uid(),title:"",text:d.get
 // To-do
 let editT = null;
 function taskEditForm(t) {
-  return `<form class="tedit" data-form="taskEdit" data-id="${t.id}" style="--h:${(tagOf(t.tag) || {h:200}).h}">
+  return `<form class="tedit" data-form="taskEdit" data-id="${t.id}" style="--h:${tagHue(t)}">
     <label class="f">Tâche<input type="text" id="te-title-${t.id}" name="title" value="${esc(t.title)}" required></label>
     <div class="tedit-row">
       <label class="f">Échéance<input type="date" name="due" value="${esc(t.due || "")}"></label>
       <label class="f">Jusqu'au<input type="date" name="due2" value="${esc(t.due2 || "")}" title="Pour une tâche sur plusieurs jours, par exemple un week-end"></label>
-      <label class="f">Étiquette<select name="tag">${S.todo.tags.map(g => `<option value="${g.id}" ${t.tag === g.id ? "selected" : ""}>${esc(g.name)}</option>`).join("")}</select></label>
       <label class="f">Priorité<select name="prio">${[[1,"Basse"],[2,"Moyenne"],[3,"Haute"]].map(([v, l]) => `<option value="${v}" ${+t.prio === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
       <label class="f">Statut<select name="status">${KCOLS.map(([k, l]) => `<option value="${k}" ${(t.status || "todo") === k ? "selected" : ""}>${l}</option>`).join("")}</select></label>
     </div>
+    <div class="f"><span>Étiquettes</span>${tagPick(tagsOf(t), "te-" + t.id)}</div>
     <label class="f">Détails<textarea name="detail" rows="3" placeholder="Détails, contacts, liens, étapes…">${esc(t.detail || "")}</textarea></label>
     <div class="row"><button class="btn pri">Enregistrer</button><button class="btn" type="button" data-act="taskEditCancel">Annuler</button><span class="spacer"></span><button class="btn sm ghost" type="button" data-act="taskDel" data-id="${t.id}">Supprimer la tâche</button></div></form>`;
 }
 const editBtn = t => `<button class="x dbtn ${t.detail ? "has" : ""}" data-act="taskEdit" data-id="${t.id}" aria-label="Modifier ${esc(t.title)}" title="Modifier la tâche">${ic("pen", 15)}</button>`;
 function taskRow(t) {
   if (editT === t.id) return `<div class="item editing">${taskEditForm(t)}</div>`;
-  return `<div class="item ${t.done ? "done" : ""}" style="--h:${(tagOf(t.tag) || {h:200}).h}"><span class="prio p${t.prio}" title="Priorité ${["","basse","moyenne","haute"][t.prio]}"></span>
+  return `<div class="item ${t.done ? "done" : ""}" style="--h:${tagHue(t)}"><span class="prio p${t.prio}" title="Priorité ${["","basse","moyenne","haute"][t.prio]}"></span>
     <input type="checkbox" class="check" data-in="taskDone" data-id="${t.id}" ${t.done ? "checked" : ""} aria-label="Terminer ${esc(t.title)}">
-    <div class="body"><div class="t" data-act="taskEdit" data-id="${t.id}" title="Cliquer pour modifier">${esc(t.title)}${exChip(t)}</div><div class="meta">${tagChip(t.tag)}${dueChip(t.due, t.done, t.due2)}</div>${detailBox(t.id, t.detail, "taskDetail")}</div>
+    <div class="body"><div class="t" data-act="taskEdit" data-id="${t.id}" title="Cliquer pour modifier">${esc(t.title)}${exChip(t)}</div><div class="meta">${tagChips(t)}${dueChip(t.due, t.done, t.due2)}</div>${detailBox(t.id, t.detail, "taskDetail")}</div>
     ${editBtn(t)}<button class="x" data-act="taskDel" data-id="${t.id}" aria-label="Supprimer">×</button></div>`;
 }
 ACT.taskEdit = el => { editT = el.dataset.id; render(); const i = $("#te-title-" + editT); if (i) { i.focus(); i.select(); } return false; };
 ACT.taskEditCancel = () => { editT = null; };
 FORM.taskEdit = (f, d) => {
   const t = S.todo.tasks.find(x => x.id === f.dataset.id); if (!t) { editT = null; return; }
-  t.title = d.get("title") || t.title; t.due = d.get("due") || ""; t.due2 = t.due && d.get("due2") > t.due ? d.get("due2") : ""; t.tag = d.get("tag"); t.prio = +d.get("prio") || 2;
+  t.title = d.get("title") || t.title; t.due = d.get("due") || ""; t.due2 = t.due && d.get("due2") > t.due ? d.get("due2") : ""; setTags(t, d.getAll("tags").concat(newTagIds(d.get("newtags")))); t.prio = +d.get("prio") || 2;
   t.status = d.get("status") || "todo"; t.done = t.status === "done"; t.detail = d.get("detail") || ""; delete t.ex;
   editT = null; save("todo"); toast("Tâche modifiée");
 };
 document.addEventListener("keydown", e => { if (e.key === "Escape" && editT) { editT = null; render(); } });
 R.todo = () => {
-  const T = today(), P = S.prefs; const tasks = S.todo.tasks.filter(t => P.todoTag === "all" || t.tag === P.todoTag);
+  const T = today(), P = S.prefs; const tasks = S.todo.tasks.filter(t => P.todoTag === "all" || hasTag(t, P.todoTag));
   const open = tasks.filter(t => !t.done), done = tasks.filter(t => t.done);
   const groups = [
     ["En retard", t => t.due && t.due < T], ["Aujourd'hui", t => t.due === T], ["Cette semaine", t => t.due > T && diffD(t.due, T) <= 7],
@@ -1062,12 +1076,12 @@ R.todo = () => {
   `<section class="card"><form class="add" data-form="taskAdd">
      <input type="text" id="t-title" name="title" placeholder="Nouvelle tâche…" required>
      <input type="date" id="t-due" name="due" aria-label="Échéance">
-     <select name="tag" id="t-tag" aria-label="Étiquette">${S.todo.tags.map(t => `<option value="${t.id}" ${P.todoTag === t.id ? "selected" : ""}>${esc(t.name)}</option>`).join("")}</select>
      <select name="prio" id="t-prio" aria-label="Priorité"><option value="1">Priorité basse</option><option value="2" selected>Priorité moyenne</option><option value="3">Priorité haute</option></select>
-     <button class="btn pri">Ajouter</button></form>
+     <button class="btn pri">Ajouter</button>
+     ${tagPick(P.todoTag === "all" ? [] : [P.todoTag], "t")}</form>
      <div class="row"><span class="muted small">Raccourcis :</span>${[["Aujourd'hui",0],["Demain",1],["Dans 1 semaine",7]].map(([l, n]) => `<button class="btn sm" type="button" data-act="setDue" data-n="${n}">${l}</button>`).join("")}</div></section>
   <div class="row"><div class="seg" role="group" aria-label="Affichage"><button data-act="todoView" data-v="liste" aria-pressed="${P.todoView !== "kanban"}">${ic("list", 16)}Liste</button><button data-act="todoView" data-v="kanban" aria-pressed="${P.todoView === "kanban"}">${ic("grid", 16)}Kanban</button></div></div>
-  <div class="tabs" role="group" aria-label="Filtrer par étiquette"><button data-act="todoTag" data-id="all" aria-pressed="${P.todoTag === "all"}">Toutes</button>${S.todo.tags.map(t => `<button style="--h:${t.h}" data-act="todoTag" data-id="${t.id}" aria-pressed="${P.todoTag === t.id}"><span class="dot"></span>${esc(t.name)} <span class="muted small">${S.todo.tasks.filter(x => x.tag === t.id && !x.done).length}</span></button>`).join("")}</div>
+  <div class="tabs" role="group" aria-label="Filtrer par étiquette"><button data-act="todoTag" data-id="all" aria-pressed="${P.todoTag === "all"}">Toutes</button>${S.todo.tags.map(t => `<button style="--h:${t.h}" data-act="todoTag" data-id="${t.id}" aria-pressed="${P.todoTag === t.id}"><span class="dot"></span>${esc(t.name)} <span class="muted small">${S.todo.tasks.filter(x => hasTag(x, t.id) && !x.done).length}</span></button>`).join("")}</div>
   ${P.todoView === "kanban" ? kanban(tasks) + `<div class="grid-2">${tagManager()}</div>` : `<div class="grid-2"><div class="stack" style="gap:16px">
   ${groups.map(([n, fn]) => { const l = sorted.filter(fn); return l.length ? `<section class="card"><h2>${ic(n === "En retard" ? "clock" : n === "Sans échéance" ? "list" : "calendar")}${n} <span class="sub">${l.length}</span></h2><div class="list">${l.map(taskRow).join("")}</div></section>` : ""; }).join("") || `<p class="empty">Aucune tâche ici. Ajoute la première au-dessus.</p>`}
   </div><div class="stack" style="gap:16px">
@@ -1075,14 +1089,14 @@ R.todo = () => {
     ${done.length ? `<button class="btn sm" data-act="toggleDone">${P.showDone ? "Masquer" : "Afficher"}</button>${P.showDone ? `<div class="list">${done.map(taskRow).join("")}</div><button class="btn sm" data-act="clearDone">Supprimer les terminées</button>` : ""}` : `<p class="muted small">Coche une tâche pour la ranger ici.</p>`}</section>
   ${tagManager()}</div></div>`}`;
 };
-FORM.taskAdd = (f, d) => { S.todo.tasks.push({id:uid(),title:d.get("title"),due:d.get("due"),tag:d.get("tag"),prio:+d.get("prio"),done:false,status:"todo",detail:""}); save("todo"); const t = tagOf(d.get("tag")); if (t && t.page) toast("Ajoutée, elle apparaît aussi dans la page " + (PAGES.find(p => p[0] === t.page) || [0, ""])[1]); };
+FORM.taskAdd = (f, d) => { const nt = {id:uid(),title:d.get("title"),due:d.get("due"),prio:+d.get("prio"),done:false,status:"todo",detail:""}; setTags(nt, d.getAll("tags").concat(newTagIds(d.get("newtags")))); S.todo.tasks.push(nt); save("todo"); const t = tagsOf(nt).map(tagOf).find(g => g && g.page); if (t && t.page) toast("Ajoutée, elle apparaît aussi dans la page " + (PAGES.find(p => p[0] === t.page) || [0, ""])[1]); };
 FORM.tagAdd = (f, d) => { const hs = [10,60,110,180,230,280,330]; S.todo.tags.push({id:uid(),name:d.get("n"),h:hs[S.todo.tags.length % hs.length],page:d.get("p") || ""}); save("todo"); };
 ACT.setDue = el => { $("#t-due").value = addD(today(), +el.dataset.n); return false; };
 const KCOLS = [["todo","À faire"],["doing","En cours"],["done","Fait"]];
 function kanban(tasks) {
   return `<div class="kanban">${KCOLS.map(([k, n], ci) => { const l = tasks.filter(t => (t.status || "todo") === k).sort((a, b) => (a.due || "9").localeCompare(b.due || "9") || b.prio - a.prio);
     return `<section class="kcol" data-col="${k}"><h2>${n} <span class="sub">${l.length}</span></h2>
-      ${l.map(t => editT === t.id ? `<article class="kcard editing">${taskEditForm(t)}</article>` : `<article class="kcard" draggable="true" data-task="${t.id}" style="--h:${(tagOf(t.tag) || {h:200}).h}"><div class="t" data-act="taskEdit" data-id="${t.id}" title="Cliquer pour modifier">${esc(t.title)}${exChip(t)}</div><div class="meta">${tagChip(t.tag)}${dueChip(t.due, t.done, t.due2)}</div>${t.detail ? `<p class="detail-prev">${esc(t.detail.split("\n")[0].slice(0, 90))}</p>` : ""}
+      ${l.map(t => editT === t.id ? `<article class="kcard editing">${taskEditForm(t)}</article>` : `<article class="kcard" draggable="true" data-task="${t.id}" style="--h:${tagHue(t)}"><div class="t" data-act="taskEdit" data-id="${t.id}" title="Cliquer pour modifier">${esc(t.title)}${exChip(t)}</div><div class="meta">${tagChips(t)}${dueChip(t.due, t.done, t.due2)}</div>${t.detail ? `<p class="detail-prev">${esc(t.detail.split("\n")[0].slice(0, 90))}</p>` : ""}
         <div class="kact">${ci > 0 ? `<button class="btn sm ghost" data-act="kMove" data-id="${t.id}" data-to="${KCOLS[ci - 1][0]}" aria-label="Vers ${KCOLS[ci - 1][1]}">←</button>` : ""}<span class="spacer"></span>${editBtn(t)}<button class="x" data-act="taskDel" data-id="${t.id}" aria-label="Supprimer">×</button>${ci < 2 ? `<button class="btn sm ghost" data-act="kMove" data-id="${t.id}" data-to="${KCOLS[ci + 1][0]}" aria-label="Vers ${KCOLS[ci + 1][1]}">→</button>` : ""}</div></article>`).join("") || `<p class="kempty">Glisse une carte ici</p>`}</section>`; }).join("")}</div>`;
 }
 const setStatus = (id, s) => { const t = S.todo.tasks.find(x => x.id === id); if (!t) return; t.status = s; t.done = s === "done"; save("todo"); };
@@ -1096,7 +1110,7 @@ ACT.todoTag = el => { S.prefs.todoTag = el.dataset.id; save("prefs"); };
 ACT.toggleDone = () => { S.prefs.showDone = !S.prefs.showDone; save("prefs"); };
 ACT.clearDone = () => { unlinkCours(S.todo.tasks.filter(t => t.done)); S.todo.tasks = S.todo.tasks.filter(t => !t.done); save("todo"); };
 ACT.taskDel = el => { if (editT === el.dataset.id) editT = null; unlinkCours(S.todo.tasks.filter(t => t.id === el.dataset.id)); S.todo.tasks = S.todo.tasks.filter(t => t.id !== el.dataset.id); save("todo"); };
-ACT.tagDel = el => { if (S.todo.tags.length <= 1) return toast("Garde au moins une étiquette"); S.todo.tags = S.todo.tags.filter(t => t.id !== el.dataset.id); if (S.prefs.todoTag === el.dataset.id) S.prefs.todoTag = "all"; save("todo"); save("prefs"); };
+ACT.tagDel = el => { if (S.todo.tags.length <= 1) return toast("Garde au moins une étiquette"); S.todo.tags = S.todo.tags.filter(t => t.id !== el.dataset.id); S.todo.tasks.forEach(t => { if (hasTag(t, el.dataset.id)) setTags(t, tagsOf(t).filter(x => x !== el.dataset.id)); }); if (S.prefs.todoTag === el.dataset.id) S.prefs.todoTag = "all"; save("todo"); save("prefs"); };
 IN.taskDetail = el => { S.todo.tasks.find(x => x.id === el.dataset.id).detail = el.value; grow(el); save("todo"); return false; };
 IN.taskDone = el => { const t = S.todo.tasks.find(x => x.id === el.dataset.id); t.done = el.checked; t.status = el.checked ? "done" : "todo"; save("todo"); if (el.checked) toast("Bien joué !"); setTimeout(render, 250); return false; };
 
@@ -1105,7 +1119,7 @@ let weekOff = 0;
 function dueOn(d) {
   const out = [];
   const T = today();
-  S.todo.tasks.forEach(t => { if (!t.done && t.due) { const end = t.due2 || t.due; if ((t.due <= d && d <= end) || (d === T && end < T)) out.push({title:t.title, h:(tagOf(t.tag) || {h:200}).h, page:"todo", id:t.id, late:end < d, prio:t.prio, span:t.due2 ? `${pISO(t.due).getDate()}–${pISO(t.due2).getDate()}` : ""}); } });
+  S.todo.tasks.forEach(t => { if (!t.done && t.due) { const end = t.due2 || t.due; if ((t.due <= d && d <= end) || (d === T && end < T)) out.push({title:t.title, h:tagHue(t), page:"todo", id:t.id, late:end < d, prio:t.prio, span:t.due2 ? `${pISO(t.due).getDate()}–${pISO(t.due2).getDate()}` : ""}); } });
   S.suf.tasks.forEach(t => { if (t.due === d && !t.done) out.push({title:"Camp · " + t.title, h:135, page:"suf"}); });
   return out;
 }
@@ -1248,7 +1262,7 @@ function undatedBlock() {
   const u = S.todo.tasks.filter(t => !t.done && !t.due); if (!u.length) return "";
   return `<section class="card"><h2>${ic("check")}Tâches à caser dans la semaine <span class="sub">${u.length} sans date</span></h2>
     <p class="muted small">Choisis un jour : la tâche apparaîtra dans l'agenda ce jour-là.</p>
-    <div class="list">${u.slice(0, 12).map(t => `<div class="item" style="--h:${(tagOf(t.tag) || {h:200}).h};align-items:center"><span class="dot"></span><div class="body"><div class="t">${esc(t.title)}</div></div><input type="date" id="ud-${t.id}" data-in="agDue" data-id="${t.id}" aria-label="Date pour ${esc(t.title)}"></div>`).join("")}</div>
+    <div class="list">${u.slice(0, 12).map(t => `<div class="item" style="--h:${tagHue(t)};align-items:center"><span class="dot"></span><div class="body"><div class="t">${esc(t.title)}</div></div><input type="date" id="ud-${t.id}" data-in="agDue" data-id="${t.id}" aria-label="Date pour ${esc(t.title)}"></div>`).join("")}</div>
     ${u.length > 12 ? `<p class="small muted">Et ${u.length - 12} autres dans la <a href="#todo">to-do</a>.</p>` : ""}</section>`;
 }
 IN.agDue = el => { const t = S.todo.tasks.find(x => x.id === el.dataset.id); if (!t || !el.value || +el.value.slice(0, 4) < new Date().getFullYear() - 1) return false;
@@ -1345,7 +1359,7 @@ function sufItems() {
   const out = [];
   S.suf.tasks.forEach(t => t.due && out.push({d:t.due, title:t.title, done:t.done, h:135}));
   const tags = S.todo.tags.filter(t => t.page === "suf").map(t => t.id);
-  S.todo.tasks.forEach(t => t.due && tags.includes(t.tag) && out.push({d:t.due, d2:t.due2 || "", title:t.title, done:t.done, h:200}));
+  S.todo.tasks.forEach(t => t.due && tagsOf(t).some(x => tags.includes(x)) && out.push({d:t.due, d2:t.due2 || "", title:t.title, done:t.done, h:200}));
   const accs = S.agenda.accounts.filter(a => /suf|scout/i.test(a.name)).map(a => a.id);
   S.agenda.events.forEach(e => accs.includes(e.acc) && e.date >= addD(today(), -31) && out.push({d:e.date, title:e.title, done:false, h:250}));
   return out.sort((a, b) => a.d.localeCompare(b.d));
@@ -2436,7 +2450,7 @@ document.addEventListener("click", e => {
 document.addEventListener("submit", e => {
   const f = e.target; const h = FORM[f.dataset.form]; if (!h) return;
   e.preventDefault();
-  const d = new FormData(f); for (const [k, v] of d) if (typeof v === "string") d.set(k, v.trim());
+  const d = new FormData(); for (const [k, v] of new FormData(f)) d.append(k, typeof v === "string" ? v.trim() : v);
   if (h(f, d) !== false) { render(); const first = $(`form[data-form="${f.dataset.form}"] input[type=text]`); first && f.dataset.form !== "quickIdea" && first.focus(); }
 });
 const onIn = e => { const el = e.target.closest && e.target.closest("[data-in]"); if (!el) return; const h = IN[el.dataset.in]; if (!h) return;
