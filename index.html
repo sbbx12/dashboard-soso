@@ -144,6 +144,18 @@ details summary{cursor:pointer;font-weight:600}
 .detail-prev{font-size:13px;color:var(--muted);margin-top:4px;padding-left:8px;border-left:2px solid var(--line);white-space:pre-line}
 .dbtn{font-size:13px}
 .dbtn.has{color:var(--a)}
+.stepchip{display:inline-flex;align-items:center;gap:6px;font:inherit;font-size:12px;font-weight:600;color:var(--muted);background:none;border:1px solid var(--line);border-radius:999px;padding:1px 8px 1px 6px;cursor:pointer}
+.stepchip .sbar{width:42px;height:6px;border-radius:9px;background:var(--line);overflow:hidden;display:inline-block}
+.stepchip .sbar i{display:block;height:100%;background:hsl(var(--h,160) 55% 45%);border-radius:9px}
+.stepchip.full{color:hsl(150 50% 35%)}
+.steps{display:flex;flex-direction:column;gap:2px;margin-top:6px;padding-left:8px;border-left:2px solid hsl(var(--h,160) 50% 70% / .6)}
+.step{display:flex;align-items:center;gap:6px;font-size:14px}
+.step label{display:flex;align-items:center;gap:8px;flex:1;cursor:pointer;padding:3px 0}
+.step input{width:16px;height:16px;accent-color:hsl(var(--h,160) 55% 42%)}
+.step.done span{text-decoration:line-through;color:var(--muted)}
+.step .x{opacity:.5}.step:hover .x{opacity:1}
+.stepadd{display:flex;gap:6px;margin-top:4px}
+.stepadd input{flex:1;min-width:0;font-size:13.5px;padding:5px 9px}
 .tagsel{font-size:12.5px;padding:3px 6px;border-radius:7px;background:transparent;max-width:150px}
 .chip .ic{vertical-align:-2px}
 .fic{width:38px;height:44px;border-radius:7px;background:var(--t);color:var(--a);font-size:10.5px;font-weight:800;display:grid;place-items:center;flex:none;border:1px solid var(--line);letter-spacing:.04em}
@@ -749,7 +761,7 @@ const dirty = new Set(lsGet("dirty") || []);
 const _dAdd = dirty.add.bind(dirty), _dDel = dirty.delete.bind(dirty);
 dirty.add = k => { _dAdd(k); lsSet("dirty", [...dirty]); return dirty; };
 dirty.delete = k => { const r = _dDel(k); lsSet("dirty", [...dirty]); return r; };
-const PAGE_VERSION = "11";
+const PAGE_VERSION = "12";
 function save(k) {
   lsSet(k, S[k]); lsSet("savedAt", Date.now()); if (typeof fileChanged === "function") fileChanged();
   dirty.add(k); if (!COL) return;
@@ -1047,13 +1059,25 @@ function taskEditForm(t) {
     <label class="f">Détails<textarea name="detail" rows="3" placeholder="Détails, contacts, liens, étapes…">${esc(t.detail || "")}</textarea></label>
     <div class="row"><button class="btn pri">Enregistrer</button><button class="btn" type="button" data-act="taskEditCancel">Annuler</button><span class="spacer"></span><button class="btn sm ghost" type="button" data-act="taskDel" data-id="${t.id}">Supprimer la tâche</button></div></form>`;
 }
+const openS = new Set();
+const stepsOf = t => Array.isArray(t.steps) ? t.steps : [];
+const stepChip = t => { const st = stepsOf(t); if (!st.length) return ""; const n = st.filter(x => x.done).length, p = Math.round(n / st.length * 100);
+  return `<button type="button" class="stepchip ${n === st.length ? "full" : ""}" data-act="stepsToggle" data-id="${t.id}" aria-expanded="${openS.has(t.id)}" title="Voir les étapes"><span class="sbar"><i style="width:${p}%"></i></span>${n}/${st.length}</button>`; };
+const stepsBox = t => !openS.has(t.id) ? "" : `<div class="steps">${stepsOf(t).map(x => `<div class="step ${x.done ? "done" : ""}"><label><input type="checkbox" data-in="stepDone" data-id="${t.id}" data-s="${x.id}" ${x.done ? "checked" : ""}><span>${esc(x.t)}</span></label><button type="button" class="x" data-act="stepDel" data-id="${t.id}" data-s="${x.id}" aria-label="Supprimer l'étape">×</button></div>`).join("")}
+  <form class="stepadd" data-form="stepAdd" data-id="${t.id}"><input type="text" name="s" id="sa-${t.id}" placeholder="+ ajouter une étape" aria-label="Nouvelle étape"><button class="btn sm">Ajouter</button></form></div>`;
+const stepsBtn = t => `<button class="x dbtn ${stepsOf(t).length ? "has" : ""}" data-act="stepsToggle" data-id="${t.id}" aria-label="Étapes de ${esc(t.title)}" title="Étapes à cocher">${ic("list", 15)}</button>`;
+ACT.stepsToggle = el => { const id = el.dataset.id; openS.has(id) ? openS.delete(id) : openS.add(id); render(); if (openS.has(id)) { const i = $("#sa-" + id); i && i.focus(); } return false; };
+FORM.stepAdd = (f, d) => { const t = S.todo.tasks.find(x => x.id === f.dataset.id); const v = d.get("s"); if (!t || !v) return false; t.steps = stepsOf(t).concat({id:uid(), t:v, done:false}); save("todo"); render(); const i = $("#sa-" + t.id); i && i.focus(); return false; };
+IN.stepDone = el => { const t = S.todo.tasks.find(x => x.id === el.dataset.id); const x = t && stepsOf(t).find(y => y.id === el.dataset.s); if (!x) return false; x.done = el.checked;
+  if (stepsOf(t).every(y => y.done) && !t.done) toast("Toutes les étapes sont faites, tu peux cocher la tâche !"); save("todo"); };
+ACT.stepDel = el => { const t = S.todo.tasks.find(x => x.id === el.dataset.id); if (!t) return; t.steps = stepsOf(t).filter(y => y.id !== el.dataset.s); save("todo"); };
 const editBtn = t => `<button class="x dbtn ${t.detail ? "has" : ""}" data-act="taskEdit" data-id="${t.id}" aria-label="Modifier ${esc(t.title)}" title="Modifier la tâche">${ic("pen", 15)}</button>`;
 function taskRow(t) {
   if (editT === t.id) return `<div class="item editing">${taskEditForm(t)}</div>`;
   return `<div class="item ${t.done ? "done" : ""}" style="--h:${tagHue(t)}"><span class="prio p${t.prio}" title="Priorité ${["","basse","moyenne","haute"][t.prio]}"></span>
     <input type="checkbox" class="check" data-in="taskDone" data-id="${t.id}" ${t.done ? "checked" : ""} aria-label="Terminer ${esc(t.title)}">
-    <div class="body"><div class="t" data-act="taskEdit" data-id="${t.id}" title="Cliquer pour modifier">${esc(t.title)}${exChip(t)}</div><div class="meta">${tagChips(t)}${dueChip(t.due, t.done, t.due2)}</div>${detailBox(t.id, t.detail, "taskDetail")}</div>
-    ${editBtn(t)}<button class="x" data-act="taskDel" data-id="${t.id}" aria-label="Supprimer">×</button></div>`;
+    <div class="body"><div class="t" data-act="taskEdit" data-id="${t.id}" title="Cliquer pour modifier">${esc(t.title)}${exChip(t)}</div><div class="meta">${stepChip(t)}${tagChips(t)}${dueChip(t.due, t.done, t.due2)}</div>${stepsBox(t)}${detailBox(t.id, t.detail, "taskDetail")}</div>
+    ${stepsBtn(t)}${editBtn(t)}<button class="x" data-act="taskDel" data-id="${t.id}" aria-label="Supprimer">×</button></div>`;
 }
 ACT.taskEdit = el => { editT = el.dataset.id; render(); const i = $("#te-title-" + editT); if (i) { i.focus(); i.select(); } return false; };
 ACT.taskEditCancel = () => { editT = null; };
@@ -1096,8 +1120,8 @@ const KCOLS = [["todo","À faire"],["doing","En cours"],["done","Fait"]];
 function kanban(tasks) {
   return `<div class="kanban">${KCOLS.map(([k, n], ci) => { const l = tasks.filter(t => (t.status || "todo") === k).sort((a, b) => (a.due || "9").localeCompare(b.due || "9") || b.prio - a.prio);
     return `<section class="kcol" data-col="${k}"><h2>${n} <span class="sub">${l.length}</span></h2>
-      ${l.map(t => editT === t.id ? `<article class="kcard editing">${taskEditForm(t)}</article>` : `<article class="kcard" draggable="true" data-task="${t.id}" style="--h:${tagHue(t)}"><div class="t" data-act="taskEdit" data-id="${t.id}" title="Cliquer pour modifier">${esc(t.title)}${exChip(t)}</div><div class="meta">${tagChips(t)}${dueChip(t.due, t.done, t.due2)}</div>${t.detail ? `<p class="detail-prev">${esc(t.detail.split("\n")[0].slice(0, 90))}</p>` : ""}
-        <div class="kact">${ci > 0 ? `<button class="btn sm ghost" data-act="kMove" data-id="${t.id}" data-to="${KCOLS[ci - 1][0]}" aria-label="Vers ${KCOLS[ci - 1][1]}">←</button>` : ""}<span class="spacer"></span>${editBtn(t)}<button class="x" data-act="taskDel" data-id="${t.id}" aria-label="Supprimer">×</button>${ci < 2 ? `<button class="btn sm ghost" data-act="kMove" data-id="${t.id}" data-to="${KCOLS[ci + 1][0]}" aria-label="Vers ${KCOLS[ci + 1][1]}">→</button>` : ""}</div></article>`).join("") || `<p class="kempty">Glisse une carte ici</p>`}</section>`; }).join("")}</div>`;
+      ${l.map(t => editT === t.id ? `<article class="kcard editing">${taskEditForm(t)}</article>` : `<article class="kcard" draggable="true" data-task="${t.id}" style="--h:${tagHue(t)}"><div class="t" data-act="taskEdit" data-id="${t.id}" title="Cliquer pour modifier">${esc(t.title)}${exChip(t)}</div><div class="meta">${stepChip(t)}${tagChips(t)}${dueChip(t.due, t.done, t.due2)}</div>${stepsBox(t)}${t.detail ? `<p class="detail-prev">${esc(t.detail.split("\n")[0].slice(0, 90))}</p>` : ""}
+        <div class="kact">${ci > 0 ? `<button class="btn sm ghost" data-act="kMove" data-id="${t.id}" data-to="${KCOLS[ci - 1][0]}" aria-label="Vers ${KCOLS[ci - 1][1]}">←</button>` : ""}<span class="spacer"></span>${stepsBtn(t)}${editBtn(t)}<button class="x" data-act="taskDel" data-id="${t.id}" aria-label="Supprimer">×</button>${ci < 2 ? `<button class="btn sm ghost" data-act="kMove" data-id="${t.id}" data-to="${KCOLS[ci + 1][0]}" aria-label="Vers ${KCOLS[ci + 1][1]}">→</button>` : ""}</div></article>`).join("") || `<p class="kempty">Glisse une carte ici</p>`}</section>`; }).join("")}</div>`;
 }
 const setStatus = (id, s) => { const t = S.todo.tasks.find(x => x.id === id); if (!t) return; t.status = s; t.done = s === "done"; save("todo"); };
 ACT.kMove = el => setStatus(el.dataset.id, el.dataset.to);
